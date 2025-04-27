@@ -1,22 +1,43 @@
-暂时记录React的学习笔记，待日后整理。
+## REACT学习笔记
 
-所有东西都是入门级的资料。
+之前学过一段时间REACT，后面又生疏了，这里从新开始。
 
-##### 大前端现状
 
-现在大前端是这样的：
 
-- web，有VUE和REACT和ANGULAR，还有其他大大小小的前端框架，FLUTTER也有WEB版本但是还不流行
-- 安卓和IOS，REACT-NATIVE和FLUTTER，就这两个
-- 桌面应用，ELECTRON是平台，底层可以支持用JS前端框架开发，基于这个原理有REACT-NATIVE和FLUTTER的对应PC开发环境
+##### Hello World
 
-所以只学VUE，范围就很窄，只能用于WEB，安卓，IOS，PC都要有学习成本，相对来说REACT和FLUTTER都是比较好的选择，但REACT还有WEB版本所以综合来说REACT很流行，加上字节全面站队REACT也说明这个东西应该要学。
+这里先从[PLAYGROUND](https://playcode.io/react)开始吧。
 
-但是2019年之后FLUTTER也开始追赶，到2022年开发占有率已经超过了REACT NATIVE(RN)，而且有人说它性能更好，所以等于FLUTTER也要学习。
+比如一个最简单的写法：
 
-总之大公司竞争，工具会持续更新，所以都要学。
+```jsx
+function MyButton({btnText}) { // 这里声明了一个自定义按钮组件，并提供了一个外部设置按钮文字的属性
+  return (
+    <button>{btnText}</button> // 这里用大括号{}来包裹HTML内的JS表达式
+  )
+}
 
-##### 渐进式入门
+export function App(props) {
+  const btnText = "I am a button"; // 声明组件属性，后续用{}进行组件传参
+  return (
+    <div className='App'>
+      <h1>Hello React.</h1>
+      <h2>Start editing to see some magic happen!</h2>
+      <MyButton btnText={btnText} />
+    </div>
+  );
+}
+```
+
+这种`function Cpn() { return (<div>html</div>) }`语法，在JS代码内直接混入HTML代码的风格，就是JSX。它这样设计背后的思想是，UI交互逻辑本来就不应该和表现层分开，因此混在一起进行组件化更好，关注点分离是逻辑分离而非技术栈分离。
+
+
+
+
+
+
+
+
 
 React（以下简称R）
 
