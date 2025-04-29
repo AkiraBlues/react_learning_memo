@@ -118,9 +118,77 @@ npx create-next-app@latest
 
 后续开发测试就可以直接使用这个环境，建议初学的时候不要用TS。
 
+插件部分不用刻意去安装JSX相关的，因为最近版本的VSCODE已经原生支持了，只是NEXTJS默认使用JS文件来编写JSX语法，如果需要对当前项目某个路径内的JS文件生效，可以打开VSCODE的当前项目（workspace）设定，加上下面的内容：
+
+```json
+"files.associations": {
+    "**/src/app/**/*.js": "javascriptreact"
+}
+```
+
+然后重启IDE就可以看到对应路径下的所有JS都默认是JSX了。
+
+另外如果之前配置了POWERSHELL，也需要重启IDE以使得其生效。
+
+然后把NEXTJS的文件路径改一下：
+
+```
+|---root
+  |---src
+    |---layout.js 这个可以视为总页面组件
+    |---home 通过/home路径访问
+       |---page.js 页面组件
+    |---test 通过/test路径访问
+       |---page.js 页面组件
+```
+
+目前以学习REACT为主，因此测试的部分可以直接在test/page.js内去写，或者也可以写多个DEMO页面，注意每新开一个页面都要通过创建一个文件夹+page.js的方式完成，这个是NEXTJS规定的，无法不创建文件夹就创建新页面。
 
 
 
+#### 安装TAILWINDCSS
+
+上述部分完成后就可以开始写组件了，至于CSS的部分，有2个方法，一是传统的声明一个CSS文件，必须以`.module.css`结尾，然后在page.js内引入，并且在不同DOM上标记，这样做可以避免CSS冲突。另一个方法就是用tailwind.css，目前看好像算是标配了。
+
+NEXTJS项目内安装TAILWINDCSS的方法，已经进入TAILWINDCSS V4版本了，POWERSHELL执行：
+
+```powershell
+npm install tailwindcss @tailwindcss/postcss postcss
+```
+
+项目根目录创建一个`postcss.config.mjs`文件，这个就是POSTCSS的配置文件，这样写：
+
+```js
+/** @type {import('tailwindcss').Config} */
+const config = {
+  plugins: {
+    "@tailwindcss/postcss": {},
+  },
+};
+export default config;
+```
+
+注意从V4开始不需要额外声明一个TAILWINDCSS配置文件，它有默认配置，如果需要调整后面再说，然后全局CSS文件global.css里面引入这个CSS：
+
+```css
+@import "tailwindcss";
+```
+
+最后确保全局的layout.js内引入了这个global.css：
+
+```js
+import "./globals.css";
+```
+
+然后就可以开始写了，比如：
+
+```jsx
+export default function Index() {
+  return (
+    <h1 className="text-3xl font-bold underline text-center">there is nothing here, try using /home or /test</h1>
+  );
+}
+```
 
 
 
