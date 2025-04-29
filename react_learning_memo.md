@@ -4,7 +4,7 @@
 
 
 
-##### Hello World
+#### Hello World
 
 这里先从[PLAYGROUND](https://playcode.io/react)开始吧。
 
@@ -33,26 +33,96 @@ export function App(props) {
 
 
 
+#### 本地开发环境搭建
+
+之前的教程都有点落后了，这里给出一个2025在WINDOWS上的最新版本。
+
+以下命令需要在POWERSHELL内执行：
+
+```powershell
+# Download and install fnm:
+winget install Schniz.fnm
+
+# Download and install Node.js:
+fnm install 22 --fnm-dir E:\nodejs_fnm
+
+# use specific node version
+fnm use 22
+```
+
+注意可以在环境变量内设置FNM_DIR，来控制后续安装NODEJS的路径。
+
+后续还要继续设置POWERSHELL，而且FNM目前还不兼容CMD，因此后续建议都用POWERSHELL运行fnm相关命令。
+
+首先确认POWERSHELL的版本，执行：
+
+```powershell
+$PSVersionTable.PSVersion
+```
+
+主流是5或6。
+
+然后确认一下PWOERSHELL是否有脚本文件，执行：
+
+```powershell
+nodepad $profile
+```
+
+如果弹出的记事本提示找不到路径，说明没有创建POWERSHELL配置脚本，需要手动创建，脚本的作用是每次打开POWERSHELL的时候可以自动执行，因此可以做一些初始化配置。要创建脚本，执行：
+
+```powershell
+if (!(Test-Path -Path $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force }
+```
+
+然后再执行`nodepad $profile`就可以看到这个文件被创建了，它的位置和POWERSHELL版本有关。
+
+创建好配置文件后，重启POWERSHELL，并执行：
+
+```powershell
+Get-ExecutionPolicy
+```
+
+如果提示是限制，说明当前的POWERSHELL出于OS的安全策略，不能主动执行脚本，所以这样修改，**先以管理员身份启动POWERSHELL**，然后执行：
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy Unrestricted
+```
+
+有时候WINDOWS出于安全策略会再次提示是否更改，这里要确定。
+
+然后找到POWERSHELL的脚本文件，加上下面内容：
+
+```powershell
+# set fnm command for powershell
+fnm env --use-on-cd --shell powershell | Out-String | Invoke-Expression
+```
+
+然后再次重启POWERSHELL，执行：
+
+```powershell
+node -v
+npm -v
+```
+
+如果有信息输出，说明脚本执行成功了，到此FNM和NODEJS就安装完成。
+
+P.S. 上述操作真的展示了在WINDOWS下开发有多么不方便，不管是RUST还是NODEJS还是SOLIDITY都是LINUX更友好。
+
+之后进入工作空间，执行以下命令：
+
+```powershell
+npx create-next-app@latest
+```
+
+之后按照提示进行配置，安装完成后启动`npm run dev`，浏览器3000端口就可以看到效果了。
+
+后续开发测试就可以直接使用这个环境，建议初学的时候不要用TS。
 
 
 
 
 
 
-React（以下简称R）
-
-安装，通过`create-react-app`，注意要结合TS来学习，因此搭建项目的时候要选TS模板。早期是用全局安装的方式搭建的，现在改成npx xxxx了，这样搭建的时候下载构建，搭建完成后会自动删除，不占用全局空间。
-
-模板约定，以下文件必须存在（或许后面可以改）：
-
-- public/index.html
-- src/index.js或src/index.tsx
-
-react-scripts，这个就是react的CLI，类似WEBPACK，VITE等的作用，底层是WEBPACK支持，**在START和BUILD命令下都是引入WEBPACK，所以可以说是基于WEBPACK的封装**。
-
-和VUE一样R也有组件的概念，因此也会面临和VUE一样的问题，在浏览器中观察组件状态，因此也需要开发者工具，谷歌插件已支持，叫React Developer Tools。安装好之后开一个DEV SERVER，然后控制台可以看到原子电子的那个标志就是，它还分了组件和PROFILER。
-
-严格模式下R会渲染两次以便发现潜在问题，默认脚手架搭建之后就是严格模式，这个渲染两次叫做double render，
 
 ##### R的组件
 
