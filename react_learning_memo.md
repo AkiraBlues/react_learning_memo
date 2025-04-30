@@ -31,6 +31,21 @@ export function App(props) {
 
 这种`function Cpn() { return (<div>html</div>) }`语法，在JS代码内直接混入HTML代码的风格，就是JSX。它这样设计背后的思想是，UI交互逻辑本来就不应该和表现层分开，因此混在一起进行组件化更好，关注点分离是逻辑分离而非技术栈分离。
 
+上述代码内，**实际JSX的部分指的是括号内的，而非全部的代码**，一般是在`return`后面的部分，比如`(<h1>Hello</h1>)`，当然实际上在组件函数的任意位置也可以声明JSX，并赋值给变量，比如：
+
+```jsx
+export default function MyCpn() {
+  const line1 = (<h1>this is line one</h1>); // 这里直接声明了JSX并赋值给变量
+  const line2 = (<h2>this is line two</h2>);
+  return (
+    <div>
+      {line1}
+      {line2}
+    </div>
+  );
+}
+```
+
 
 
 #### 本地开发环境搭建
@@ -142,7 +157,15 @@ npx create-next-app@latest
        |---page.js 页面组件
 ```
 
-目前以学习REACT为主，因此测试的部分可以直接在test/page.js内去写，或者也可以写多个DEMO页面，注意每新开一个页面都要通过创建一个文件夹+page.js的方式完成，这个是NEXTJS规定的，无法不创建文件夹就创建新页面。
+目前以学习REACT为主，因此测试的部分可以直接在test/page.js内去写，或者也可以写多个DEMO页面，注意每新开一个页面都要通过创建一个文件夹+page.js的方式完成，这个是NEXTJS规定的，无法不创建文件夹就创建新页面。而且每个page.js内只能有一个默认导出`export default`，不能有任何命名导出，这样NEXTJS才知道怎么去渲染。
+
+ 另外测试页面先在头部统一加上以下代码，**以确保当前页面进入客户端渲染模式，以支持完整的REACT场景，比如组件添加事件等等**：
+
+```js
+'use client';
+
+// export default function MyPage() {}
+```
 
 
 
@@ -192,9 +215,9 @@ export default function Index() {
 
 
 
-##### R的组件
+#### 声明组件
 
-组件是R的核心概念，应该和VUE差不多，即封装了UI和业务逻辑的功能模块，组件都是函数，在R这里组件就是返回了一个HTML和业务逻辑的函数，有点像用JS的FUNCTION做NEW OBJECT的意思，因此函数名是构造函数，首字母大写：
+组件是REACT的核心概念，通过函数声明组件，首字母大写，所以一般的函数还是传统的camelCase写法，REACT组件的函数使用首字母大写的UpperCamelCase写法以区分：
 
 ```jsx
 function MyCpn() {
@@ -203,55 +226,272 @@ function MyCpn() {
   );
 }
 
+export default MyCpn; // 注意如果分模块写则组件要导出
+```
+
+如果组件的HTML是单行足够表示，比如`<h1>Hello React</h1>`，则可以省略括号。
+
+但是所有组件都必须返回单一DOM节点，即不能写成：
+
+```jsx
+function MyCpn() {
+  return (
+    {/* 这样会报错 */}
+    <h1>Hello React</h1>
+    <h2>another node</h2> 
+  );
+}
+
 export default MyCpn;
 ```
 
-组件要导出，参考VUE的SFC，核心是单一职责和关注点分离，因此一个组件对应一个文件，不需要命名导出更方便一点。
-
-然后在入口的App.tsx内引入，和VUE一样，记得**REACT的组件都是首字母大写**：
+REACT这样设计纯粹是方便考量，它需要执行括号内的部分以构建虚拟DOM，如果每个JSX都只返回一个节点，则它不需要考虑JSX前后的代码是否仍然是JSX的范围的问题（因为JSX使用括号，这个符号在JS代码内太普遍了，会增加解析器的难度），而**如果返回多个节点，则解析器需要判断一个JSX结束的位置，在多行场景下这个判断会需要额外的工作量，因此降低编译和渲染效率**，因此REACT禁止开发者返回多个节点，如果需要返回多个节点，用一个容器节点，比如DIV，或者用一个虚拟DOM专用节点`<></>`来包裹，比如：
 
 ```jsx
-import logo from './logo.svg';
-import './App.css';
-
-// 这里可以随意命名，但是后面引用组件的时候要用你在这里写的名字，首字母一定要大写
-import MyCpn2 from './MyCpn';
-
-function App() {
+function MyCpn() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <MyCpn2 />
-      </header>
+    {/* 这样是可以的 */}
+    <>
+      <h1>Hello React</h1>
+      <h2>another node</h2>
+    </>
+  );
+}
+
+export default MyCpn;
+```
+
+处理代码内的不同部分的开始和结束问题一直是前端的一个难点，比如VUE使用`<template>`标签来控制开始和结束，在这点上设计思路和REACT是一样的。
+
+使用组件就如同使用一个ESM模块一样简单，举例：
+
+```jsx
+export default function MyCpn() {
+  return (
+    <div>
+      {/* 这里是作为组件而非HTML标签引入的，因此组件名称首字母大写，引入外部组件也是同理 */}
+      <Profile />
+      <ProfileDesc />
     </div>
   );
 }
 
-export default App;
+function Profile() {
+  return (
+    <img
+      src="https://i.imgur.com/MK3eW3As.jpg"
+      alt="Katherine Johnson"
+    />
+  );
+}
+
+function ProfileDesc() {
+  return (
+    <h4>a scientist</h4>
+  )
+}
 ```
 
-这个理念很有意思，**R的HTML模板直接写在代码内，比起VUE封装了一下TEMPLATE更返璞归真**（VUE的TEMPLATE也是通过元编程转为RENDER函数，然后执行RENDER函数来更新组件的），所以TEMPLATE内的东西本质也是JS代码。
+如果是使用ESM引入，则变量名可以自定义，但是需要保证变量首字母必须大写，因为后续它要作为一个组件嵌入到JSX内，而**JSX通过标签首字母大写来判断它是一个原生的DOM节点还是一个组件节点**。
 
-##### JSX语法基础
 
-构造函数返回一个括号，括号内是HTML模板，HTML模板只能有一个根标签，根标签可以是具体的div或者section之类的，也可以是一个空标签，即`<></>`这种，这种处理是因为JSX语法的缘故，即**HTML代码要有一个明确的开始和结束的标志**，以便于解析器的处理，如果根标签是多标签那么这种开始和结束就不确定了，因为解析器不确定下一行代码是标签还是代码，增加解析器的判断工作量，所以为了便于它工作，相当于是约定好根标签就一个，这点VUE的SFC的template标签也是一样。
 
-另外，**所有单标签都要用`<singletag />`这种形式结尾**，以便R进行解析，双标签一定要收尾这个是确定的。
+#### JSX基础语法和注释写法
 
-**标签属性大部分情况下要转为驼峰**，比如class要用className代替，onclick要用onClick代替。
+- 使用`([HTML内容])`，括号包裹HTML表示一个JSX
+- 括号内必须用一个单节点包括一切，单节点可以不是容器节点，比如`span`，也可以是虚拟节点比如`<></>`，当然也可以是真实容器节点比如`<div></div>`
+- **如果HTML的部分是可以单行返回的单节点，则可以省略括号**
+- 使用`{}`大括号在JSX内编写JS表达式，注意JSX内使用`{}`无法编写代码，因此**无法在JSX内编写逻辑控制语句，只能使用二元表达式**
+- 单标签必须使用`/>`结尾，这个本身也是HTML规范
+- **标签属性大部分情况下要转为驼峰，此外，一些标签属性必须用另外的名称代替，比如class要用className代替，onclick要用onClick代替**，因为JSX本质还是JS代码， 而JS内`class`是关键字用于声明类
 
-单括号引用外部变量，单括号本身就是escape的意思，即内部的代码视为JS或TS代码，或者对应的表达式，不转义为HTML。
+注释写法：
 
-组件引用使用标签名，大体上类似VUE。
+```jsx
+export default function MyCpn() {
+  return (
+    // 单行的可以直接用，但是需要独占一行，此行不能有HTML代码
+    <div>{/* 使用大括号可以在任意位置编写一行或多行注释 */}
+    {/* 
+      这是一个多行注释
+      换行没有问题哦
+    */}
+      <Profile />
+      <ProfileDesc />
+    </div>
+  );
+}
+```
 
-CSS的处理，没有官方规范，由于官方是用WEBPACK处理的因此官方可能会推荐用CSS模块的方式，但这样也就限制死了构建工具，实际上代码应该和构建工具脱钩。
+大括号表达式的一些例子，比如在标签属性内引入变量：
 
-CSS的引入是REACT里面的一个难题，不像VUE直接在SFC内有完美方案，后续慢慢研究，CSS模块和**styles-components**是目前的两个最佳实践。
+```jsx
+export default function Avatar() {
+  const avatar = 'https://i.imgur.com/7vQD0fPs.jpg';
+  const description = 'Gregorio Y. Zara';
+  return (
+    <>
+      <lable>{description}</lable>
+      <img
+        className="avatar"
+        src={avatar}
+        alt={description}
+      />
+    </>
+  );
+}
+```
 
-学习的时候暂时用最简单的CSS来写，然后用TAILWIND.CSS或styles-components。
+ 大括号本质上支持的是JS表达式，因此任何可以形成表达式的语句都可以放到JSX大括号内，比如：
 
-数据处理，DATA本身就是单纯的对象，用单括号写法引入HTML片段。
+```jsx
+<span>name: {person.name}; age: {person.age}</span>
+
+<h1>current time is: {formatDate(Date.now()}</h1>
+
+<h2>{isConditionTrue ? 'true' : 'false'}</h2>
+
+<ul style={{backgroundColor: 'black', color: 'pink'}}></ul>
+```
+
+注意样式如果希望直接写，需要转为对象写法，即`style={styleObject}`，比如`style={{backgroundColor: 'black', color: 'pink'}}`，看上去是双大括号写法，而且原生CSS内的`foo-bar`写法需要转为`fooBar`。
+
+
+
+#### 组件传参
+
+REACT组件本质上是一个可执行的函数，它返回JSX以便REACT可以解析和渲染。这个函数只能在形式上接收一个入参，而且REACT会把这个入参转为对象，即使外部传入的是一个简单的数字或者字符串，举例：
+
+```jsx
+export default function MyCpn() {
+  return (
+    <div>
+      <ProfileDesc desc="some empty string" />
+    </div>
+  );
+}
+
+function ProfileDesc(desc) { // 这里试图声明一个形参，但REACT会把它转为对象，因此实际使用的时候还是写为对象.属性
+  return (
+    <h4>{desc.desc}</h4>
+  )
+}
+```
+
+REACT之所以设计组件只能接收一个入参，是为了简化开发，多个入参会使得确认实参注入的顺序，以及维护这个顺序变得复杂，对象本身方便修改，也支持使用`...`语法进行展开，在某些场合下可以减少代码量。
+
+所以通常的做法是对组件的形参进行对象展开：
+
+```jsx
+export default function MyCpn() {
+  return (
+    <div>
+      <ProfileDesc desc="some empty string" />
+    </div>
+  );
+}
+
+function ProfileDesc({desc}) { // 这里表示const {desc} = props，即直接展开形参
+  return (
+    <h4>{desc}</h4>
+  )
+}
+```
+
+一个更加具有实战性的例子：
+
+```jsx
+export default function MyCpn() {
+  const imageBoxProps = {
+    imageSrc: 'https://i.imgur.com/MK3eW3As.jpg',
+    alt: "empty string",
+    onClickHandler: function () {
+      alert('clicked');
+    }
+  };
+  return (
+    <div>
+      <ImageBox {...imageBoxProps} />
+    </div>
+  );
+}
+
+function ImageBox({imageSrc, alt, onClickHandler}) {
+  return (
+    <div>
+      <img src={imageSrc} alt={alt} onClick={onClickHandler} />
+      <span>{alt}</span>
+    </div>
+  )
+}
+```
+
+如果一个组件是这样注入实参的：
+
+```jsx
+<MyCpn foo={props.foo} bar={props.bar} barz={props.batz} />
+```
+
+则可以改为属性展开写法：
+
+```jsx
+<MyCpn {...props} />
+```
+
+组件还支持设置默认值，只针对外部未传入或者传入`undefined`时生效（外部传入`null`不会生效），比如：
+
+```jsx
+function Avatar({ person, size = 100 }) { // 这里外部使用时可以不传入size，默认会是100
+  // ...
+}
+```
+
+当然组件也支持透传，比如：
+
+```jsx
+function MyTable({rowCount, pageSize}) {
+  <MyTableCore row={rowCount} pageSize={pageSize} >
+}
+```
+
+注意REACT渲染机制使得**组件的所有入参都是实质上不可变的，即使直接修改入参也不会触发重新渲染**。
+
+
+
+#### 组件嵌套
+
+组件传参场景下，注意一个特殊属性，`children`，它是REACT规定的用于组件嵌套的特殊属性，换言之**如果组件要传参，应该禁止把`children`属性用于非嵌套场景的参数传递**，举例：
+
+```jsx
+export default function MyCpn() {
+  return (
+    <div>
+      <ContentWithTitle>
+        <h4 className="text-center font-light">a small sub title</h4>
+      </ContentWithTitle>
+    </div>
+  );
+}
+
+function ContentWithTitle({children}) {
+  return (
+    <div>
+      <h1 className="text-center font-extrabold underline">anything below is out of my control</h1>
+      {children}
+    </div>
+  )
+}
+```
+
+使用组件嵌套时，父组件必须在解构入参时显式声明`children`属性，然后把它放在组件内的位置作为插槽。**使用时，需要把组件拆为双标签写法，在内部注入HTML或者JSX**。
+
+当然children本质上也是组件的一个属性，因此它也支持传入默认值，具体可以自行尝试。
+
+
+
+下面的部分慢慢改……
+
+
 
 条件渲染，R不支持VUE的指令，也不支持IF语句，原因是JSX本质上会被转化为ReactDOM.render()的参数：
 
@@ -593,12 +833,6 @@ function App() {
 - 两者都不希望子组件可以修改，但是都确保了一定程度的放权
 - VUE的放权更少，因为VUE不存在setter，所有行为都隐藏在PROXY背后，而从设计上就杜绝了子组件直接修改PROPS的可能性，所以基本上HANDLER是父组件处理的，如果子组件有这方面需求，一般都是冒泡事件，让父组件处理，所以VUE是一个中央集权的系统，有点像SVN。
 - **R从设计上就倾向于放权**，可以直接把setter给子组件，子组件可以自己基于这个setter再封装，useState返回的第二个值就是setter，所以R的意思就是setter全部由父组件分发，子组件可以自行获取并调用，类似分布式的系统。
-
-##### 组件嵌套
-
-在常规HTML标签内引入组件这个好理解，但是R组件也有类似VUE插槽的机制，即允许组件内开放接口来嵌套其他组件。
-
-组件声明不要嵌套，这个很明显，组件的管理应该是水平的，使用的时候嵌套可以。
 
 ##### 前端路由
 
