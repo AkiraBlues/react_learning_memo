@@ -300,6 +300,7 @@ function ProfileDesc() {
 
 - 使用`([HTML内容])`，括号包裹HTML表示一个JSX
 - 括号内必须用一个单节点包括一切，单节点可以不是容器节点，比如`span`，也可以是虚拟节点比如`<></>`，当然也可以是真实容器节点比如`<div></div>`
+- **JSX支持用`null`表示，即不渲染任何节点**
 - **如果HTML的部分是可以单行返回的单节点，则可以省略括号**
 - 使用`{}`大括号在JSX内编写JS表达式，注意JSX内使用`{}`无法编写代码，因此**无法在JSX内编写逻辑控制语句，只能使用二元表达式**
 - 单标签必须使用`/>`结尾，这个本身也是HTML规范
@@ -454,7 +455,7 @@ function MyTable({rowCount, pageSize}) {
 }
 ```
 
-注意REACT渲染机制使得**组件的所有入参都是实质上不可变的，即使直接修改入参也不会触发重新渲染**。
+注意REACT渲染机制使得**组件的所有入参都是实质上不可变的，即使直接修改入参也不会触发重新渲染**。只有依赖REACT的HOOK机制，改变外部传入组件的实参后要求重新渲染，才会使得组件出现变化。
 
 
 
@@ -487,68 +488,109 @@ function ContentWithTitle({children}) {
 
 当然children本质上也是组件的一个属性，因此它也支持传入默认值，具体可以自行尝试。
 
-
-
-下面的部分慢慢改……
+这里还有一个问题，children本质上是父组件在编写时对嵌套部分的不确定的抽象，因此**父组件也无法直接把自身属性或者数据提供给通过children占位的子组件**，这个问题，会在后面的组件间数据共享部分解决。
 
 
 
-条件渲染，R不支持VUE的指令，也不支持IF语句，原因是JSX本质上会被转化为ReactDOM.render()的参数：
+#### 条件渲染和表达式JSX互相嵌套
+
+组件支持基于不同条件渲染出不同的结果，比如最简单的：
 
 ```jsx
-// JSX语法
-const id = "xyz";
-<div id={id}>Hello World!</div>
+function MyCpn({condition}) {
+  if (condition) {
+    return <h1>condition true</h1>
+  } else {
+    return <h2>condition false</h2>  
+  }
+}
+```
 
-// 转换后写法
+上述代码是全局的通过if else进行控制，但是更多时候需要在一个大组件内部的不同部分进行条件渲染，最简单的，比如展示一个人的履历，如果它有头像则展示头像，否则展示默认图片，如果它有学历或者简介则展示，否则不展示，则不能使用if else了，**只能使用{}结合二元表达式，并且把结果继续表述为JSX**，比如：
+
+```jsx
+export default function MyCpn() {
+  const props = {
+    avatar: 'https://i.imgur.com/MK3eW3As.jpg',
+    name: "some random guy",
+  };
+  return (
+    <Profile {...props} />
+  );
+}
+
+function Profile({avatar, name}) {
+  const validString = (str) => {
+    return typeof str === 'string' && str.length > 0;
+  };
+
+  return (
+    <>
+      {validString(avatar) ? (<Avatar imgSrc={avatar} />) : null}
+      {validString(name) ? (<NameTag name={name} />) : null}
+    </>
+  )
+}
+
+function Avatar({imgSrc}) {
+  return (
+    <div className="flex justify-center"><img src={imgSrc} /></div>
+  )
+}
+
+function NameTag({name}) {
+  return (
+    <h4 className="text-center font-bold">{name}</h4>
+  )
+}
+```
+
+注意二元表达式本身需要写在`{}`内，而它的结果往往是组件或者JSX，因此建议用`()`包裹JSX，所以一个完整的二元表达式写法是：
+
+```jsx
+{condition ? (<TrueJSX />) : (<FalseJSX />)}
+```
+
+当然JSX本身也支持在内部继续声明`{}`，所以很多时候会见到`{}`JS表达式包裹JSX，然后JSX内部继续声明`{}`JSX表达式的场景，有点相互嵌套的意思。
+
+**如果false的场景不需要渲染时，当然可以把二元表达式简化为逻辑短路**，就可以直接：
+
+```jsx
+{validString(avatar) && (<Avatar imgSrc={avatar} />)}
+```
+
+额外阅读，为什么`{}`表达式内不允许使用if else语法：
+
+```
+任何{}本质上会视为表达式，并把运算结果传入ReactDOM.createElement()内，比如：
+
+// 这是一个组件
+function Sample() {
+  const id = "xyz";
+  return <div id={id}>Hello World!</div>
+}
+
+// 经过REACT转换时，会把{}内的内容进行运算并传参
 React.createElement("div", {id: "xyz"}, "Hello World!")
-```
 
-注意到JSX实际上做的失去就是把HTML转为虚拟DOM，至于**大括号内的则是处理为expression，即非代码块，而是JS表达式**。注意IF写法即使不加代码快它也不是表达式，比如：
-
-```js
+而熟悉JS语法的都知道，if else是语句，statement，不是表达式，即使不加代码快它也不是表达式，比如：
 if (condition) console.log(true);
+所以记住，{}内只能编写JS表达式，所以也只能用二元表达式或者逻辑短路来进行条件渲染。
 ```
 
-**这个东西不是表达式，这个是JS引擎规定的**，它属于JS语法结构中的**语句**，虽然它可以写成一行。
 
-所以如果我们把id换成IF语句就是这样：
 
-```jsx
-// JSX语法
-<div id={if (true) return 'xyz'}>Hello World!</div>
+#### 列表渲染
 
-// 转换后写法
-React.createElement("div", {id: if(true) return 'xyz'}, "Hello World!")
-```
+注意REACT内只能使用`{}`JS表达式来创建JSX，因此拿到一个集合后，无法使用for循环，或者forEach等方式进行遍历，因为它们本质都是语句，可以操作集合，但是不能输出结果。
 
-这种代码在哪里都是不能执行的，语法上就错了，如果这样可以那么常规的：
-
-```
-const name = if (true) return 'arc';
-```
-
-实际上这样写就是错的！所以**JSX的大括号内只能写表达式，不能写语句**。
-
-因此R的条件渲染很原始：
-
-```jsx
-function MyCpn() {
-  return (
-    <h1>{Math.random() > 0.5 ? 'Hello World' : 'Hello React'}</h1>
-  );
-}
-
-export default MyCpn;
-```
-
-更优雅的方式，只能做到这样：
+唯一的途径就是用map：
 
 ```jsx
 function MyCpn() {
   return (
     <>
-    	{condition ? (<template1 />) : (<template2 />)}
+      {list.map(ele => (<ChildCpn ...ele />)}
     </>
   );
 }
@@ -556,29 +598,51 @@ function MyCpn() {
 export default MyCpn;
 ```
 
-条件渲染用map：
+当然对数组进行中间阶段的处理，比如filter，或者reduce也是可以的，只是如果要把处理后的集合渲染出来，只能用map。
 
-```jsx
-function MyCpn() {
-  return (
-    <>
-    {list.map(ele => <template>{ele}</template>}
-    </>
-  );
-}
+列表渲染常见问题是操作列表，比如一个TODOLIST，可能需要添加或者删除，此时可以用`key`属性给每个元素的根节点（或者子组件）进行标记，KEY必须是唯一的，以帮助REACT减少重复渲染的次数，复用已经渲染出的DOM。如果需要使用虚拟根节点`<></>`添加KEY，则需要改为`<Fragment key={item.id}></Fragment>`，**因为`<></>`不支持添加属性，它就是`<Fragment></Fragment>`的语法糖**。
 
-export default MyCpn;
+
+
+#### 副作用和严格模式
+
+一般来说组件都应该设计为纯函数，即非常简单的：
+
+```
+const renderedDOM = MyCpn(prop1, prop2, prop3);
 ```
 
-如果必须要用语句来控制变量，只能这样：
+只要入参给定，执行组件函数代码后，渲染出的DOM就是确定的，而且执行多次函数也是一样的结果，不会修改系统的其他状态。
 
-```jsx
-let var;
+一个纯函数组件有以下好处：
 
-// 复杂的语句把var值确定好
+- 可以在客户端和服务端同时运行，因为不依赖入参之外的因素，所以可适配的环境会更多
+- 如果对入参进行了缓存，那么重新渲染时，如果检测到这个组件的入参没有变化，这部分组件就可以跳过销毁 => 重新渲染的过程
+- 如果重新渲染时检测到入参的变动，那么可以直接放弃后续的渲染，从头开始，不用考虑组件销毁会带来额外问题
 
-<div>{var}</div>
-```
+但是现实开发中是不可能的，一些组件需要承担系统初始化的任务，这就意味着它必须要修改系统的状态，比如请求后端数据，然后把数据交给其他组件来渲染。还有一些组件需要持续地和系统进行沟通，基于用户操作或者自动持续地修改系统状态。**REACT把组件会修改系统状态的行为视为组件的副作用**。
+
+副作用通常来说需要开发者进行控制，因为如果不控制，比如多次初始化，多次请求数据，多次自动同步，都会对系统造成预测之外的影响，或者产生BUG。所以开发的时候一般会启用严格模式，它的作用就是每个组件会渲染两次（中间会执行一次销毁）以确保有副作用的组件会多次执行，如果这里的副作用没有被开发者控制好，执行2次一般就会产生BUG。
+
+在NEXTJS里面，通过在配置文件内添加`reactStrictMode: true`开启严格模式。
+
+关于副作用，通常有几种表现方式：
+
+- 从其他系统获取数据
+- 直接操作DOM（有些需求，直接操作DOM会比使用REACT框架更有效）
+- 自动化行为，比如定时，或者轮询
+- 监听事件，比如监听用户操作，或者某个端口消息
+- 访问WEB存储，比如cookie，session，storage等等
+
+后续介绍REACT的HOOKS的时候会提到怎么在这些场景控制副作用。
+
+
+
+#### 添加事件
+
+
+
+
 
 事件处理，R做了封装，比如原生是onclick，全小写，在JSX里面是`onClick`，驼峰写法，做了封装。
 
