@@ -457,6 +457,22 @@ function MyTable({rowCount, pageSize}) {
 
 注意REACT渲染机制使得**组件的所有入参都是实质上不可变的，即使直接修改入参也不会触发重新渲染**。只有依赖REACT的HOOK机制，改变外部传入组件的实参后要求重新渲染，才会使得组件出现变化。
 
+进一步拓展，比如下面的代码：
+
+```jsx
+export default function Button() {
+  let bgClz = "";
+  function handleClick() {
+    bgClz = "bg-red-100";
+  }
+  return (
+    <button className={`border-2 ${bgClz}`} onClick={handleClick}>Click me</button>
+  );
+}
+```
+
+点击按钮，尝试修改其背景色，会导致变化吗？**结论是不会**，所以不仅是修改入参不会触发重新渲染，**通过事件直接修改组件内涉及渲染的临时变量，也不会触发重新渲染**，后续介绍的REACT的HOOK机制会解释这个现象。
+
 
 
 #### 组件嵌套
@@ -614,6 +630,8 @@ const renderedDOM = MyCpn(prop1, prop2, prop3);
 
 只要入参给定，执行组件函数代码后，渲染出的DOM就是确定的，而且执行多次函数也是一样的结果，不会修改系统的其他状态。
 
+即使通过事件，手动修改参与渲染DOM的变量，比如修改入参，或者修改内部的临时变量，也不会导致DOM的变化，这是因为**执行组件函数代码后，DOM就已经确定了，后续只要不触发重新渲染，所有变动都只会发生并停留在组件函数的内部，不会触及REACT并引发任何可见的变动效果**。
+
 一个纯函数组件有以下好处：
 
 - 可以在客户端和服务端同时运行，因为不依赖入参之外的因素，所以可适配的环境会更多
@@ -631,7 +649,7 @@ const renderedDOM = MyCpn(prop1, prop2, prop3);
 - 从其他系统获取数据
 - 直接操作DOM（有些需求，直接操作DOM会比使用REACT框架更有效）
 - 自动化行为，比如定时，或者轮询
-- 监听事件，比如监听用户操作，或者某个端口消息
+- 绑定事件，比如添加用户操作事件，或者接收端口消息后触发事件
 - 访问WEB存储，比如cookie，session，storage等等
 
 后续介绍REACT的HOOKS的时候会提到怎么在这些场景控制副作用。
@@ -640,15 +658,192 @@ const renderedDOM = MyCpn(prop1, prop2, prop3);
 
 #### 添加事件
 
+原生HTML通常使用`dom.addEventListener`或者内联事件`<button onclick="clickHandler()">a button</button>`来绑定事件，MDN文档推荐用`addEventListener`的方式绑定事件，但是无论是REACT还是VUE都认为事件应该直接在DOM上可见，以方便阅读，所以JSX虽然也支持通过副作用的方式绑定事件，但是最佳实践也是使用内联事件：
+
+```jsx
+export default function Button() {
+  function handleClick() {
+    alert('You clicked me!');
+  }
+  
+  return (
+    <button className="border-2 bg-amber-50"  onClick={handleClick}>Click me</button>
+  );
+}
+```
+
+注意JSX内，内联事件的写法有区别，比如原生写法是`onclick`，在JSX内要写为`onClick`，驼峰命名，此外原生内联事件是`onclick="run_javascriptcode();"`，属性值是直接的代码执行语句，而**JSX内是传入事件变量，不需要执行**，比如`onClick={clickHandler}`。
+
+这里注意到上述写法看上去有些问题，因为绑定事件会带来副作用，而上述代码无论我们执行多少次都不会触发副作用，因为REACT的事件绑定机制并不是看上去那样简单。
+
+看上去REACT会把`onClick`转为`onclick`，但实际上不是，它创建出DOM后，会**先把所有能冒泡的事件绑定归结到根节点，然后通过事件委托的方式逐个绑定到具体的DOM上**，伪代码如下：
+
+```js
+// 假设某个DOM加了onClick事件
+
+rootNode.addEventListener('click', (event) => {
+  let target = event.target;
+
+  // 从最底层的目标开始触发它绑定的事件，然后逐层冒泡
+  while (target) {
+    const handlers = eventRegistry.get(target);
+    if (handlers && handlers['click']) {
+      handlers['click'](event);
+      break;
+    }
+    target = target.parentNode;
+  }
+});
+```
+
+如果一个事件不能冒泡，比如mouseEnter，那么REACT会直接绑定到对应的DOM上。
+
+上述代码简单理解就是REACT给每个事件绑定做了一个映射关系，KEY是DOM，VALUE是事件处理函数，能冒泡的事件都会被放到根节点进行委托，基于事件目标确认当前DOM是否绑定了映射关系，如果有就触发，然后逐层冒泡。
+
+**REACT销毁组件时，会自动解除所有注册的事件，以防止在多次渲染时事件注册多次**，不过一般来说事件会绑定在在叶子组件上，而实际上的绑定是发生在根节点，**因此每个叶子组件的销毁和重新渲染时，REACT只会更新它的DOM和事件处理函数的映射关系，根节点不需要解除注册**。对于不能冒泡的事件，REACT会直接绑定到对应的组件上，因此如果这些组件被销毁和重新创建了，那么REACT会先销毁事件，然后再重新注册，这就是即使在严格模式下，绑定事件也不会导致副作用的原因。
+
+和原生的内联事件一样，**REACT的事件处理函数通常也只接收一个入参，即`event`，事件本身**。
+
+参考组件传参，也可以把事件处理函数作为组件入参，由外部传入。
 
 
 
+#### 作为纯函数的组件的有状态性以及HOOKS入门（非常重要）
 
-事件处理，R做了封装，比如原生是onclick，全小写，在JSX里面是`onClick`，驼峰写法，做了封装。
+HTTP协议是无状态的，但是在WEB2之后通常都需要服务端记录用户状态，以提供个性化服务，所以产生了cookie和session。
 
-JSX语法会被编译为`React.createElement`，结果是虚拟DOM。
+同样的道理，REACT倾向于开发者使用纯函数组件，但同时也意味着**组件本身是无状态的**，它在首次渲染后只能保持不变，即使它具有一定的交互能力，但本质上它无法记录和用户的交互历史，并在重新渲染后体现出这个历史。而显然在WEB2时代之后丰富的UI交互能力是前端领域的发展趋势之一。
 
-##### JSX语法设计思想
+所以REACT团队设计了一套HOOKS，来让组件具有状态，但是这个状态基本上是在组件内部的，因此是一个可控制的副作用。从严格意义上看，组件不再是纯函数，因为它的状态变量一直存活到了下次渲染，直到组件被彻底销毁。而从广义上看，组件的状态只在组件内部使用（大部分时候），因此也可以把它视为组件的一部分，所以组件依然是纯函数。
+
+**REACT的HOOKS看上去有很多，但实际上归纳总结后，可以找出它们的核心设计思路：**
+
+1. **把代码（业务逻辑），或者状态，进行保存，使得它们可以独立于组件的重新渲染**
+2. **控制组件重新渲染的时机，可以基于各种条件，或者对状态的观察，或者干脆不再重新渲染**
+
+后续学习的所有HOOKS都可以使用上述思路进行分析。比如最简单的一个HOOK，`useState`，它的作用是这样：
+
+1. 保存组件的内部状态，使得其可以独立于组件的重新渲染，即组件具有了状态性
+2. 提供了修改状态后立刻预约组件重新渲染的功能`setState`
+
+举例：
+
+```jsx
+import { useState } from "react";
+
+export default function Button() {
+  const [counter, setCounter] = useState(0);
+
+  function reduce() {
+	setCounter(val => val - 1);
+  }
+  function add() {
+    setCounter(val => val + 1);
+  }
+  function reset() {
+    setCounter(0);
+  }
+
+  return (
+    <div className="flex justify-center">
+	  <button className="border-2 p-2 mr-2" onClick={reduce}>-</button>
+	  <span>counter is {counter}</span>
+	  <button className="border-2 p-2 ml-2" onClick={add}>+</button>
+	  <button className="border-2 p-2 ml-2" onClick={reset}>reset</button>
+	</div>
+  );
+}
+```
+
+ 使用HOOKS的几个原则：
+
+- 声明在组件内部开头，顺序很重要，因为是REACT在帮助组件管理它的内部状态，而REACT在管理时只是给每个组件定义了一个数组用于保存各个状态
+- 禁止使用条件语句进行声明，所有的HOOKS必须是无条件声明
+- 所有HOOKS均以`use`开头，由于REACT支持自定义HOOKS，因此声明这些HOOKS时也应该遵循此命名规范
+
+上述代码最核心的就是`const [counter, setCounter] = useState(0)`，这里的`useState`就是一个HOOK，它支持传入一个值，或者一个函数调用，当然也可以直接把函数作为值传入。如果传入函数调用，则它表示运算这个函数并获得其结果作为初始值。
+
+之后它返回一个数组，第一个元素是当前值，没有任何封装，第二个元素是一个函数，它的作用是修改当前值并在修改后计划一次重新渲染，由此也可以看出上述代码中的`setCounter`是一个异步函数，虽然counter是同步修改的但是它不会在组件UI上提现，只有重新渲染后才会提现。
+
+注意到`setCounter`可以接收一个具体的值，也可以接收一个函数，即`val = > val + 1`表示对当前值进行修改，并返回修改的结果。
+
+**必须要经过一定间隔地调用setCounter**， 否则会进入无限地重新渲染，导致堆栈溢出，这就是为什么上述例子是用事件来触发调用。
+
+执行上述代码可以发现counter修改后触发了重新渲染，如果需要检测组件的重新渲染，可以使用`useEffect`，它是另一个HOOK，用于把一个函数的执行独立于组件渲染，用法如下：
+
+```jsx
+useEffect(() => {
+  console.log("cpn re-rendered");
+});
+```
+
+注意它也是HOOK，因此也必须声明在组件内部开头，应该放在`useState`后面，也需要`import { useState } from "react"`。
+
+虽然`useState`在设计上是作为组件内部状态的管理方法，但是也可以把这个值和函数传递给子组件使用（这样会进一步破坏组件的纯函数特性，使得子组件具有了修改父组件状态并触发重新渲染的能力）， 比如：
+
+```jsx
+// 父组件顶部声明
+const [counter, setCounter] = useState(0);
+
+function CounterCpn({counter, setCounter}) {
+  // 直接使用父组件传递过来的，避免拥有自己的状态
+}
+```
+
+
+
+#### 组件渲染机制和状态不可变性
+
+总体渲染机制可以简化为：
+
+```
+触发 => 创建虚拟DOM => [DIFFING] => 修改真实DOM 
+```
+
+执行组件函数会产生虚拟DOM，**它的顺序是从父到子的**，如果是首次渲染，会先创建根节点虚拟DOM，然后发现它包含子组件函数，进一步执行子组件函数以创建子组件虚拟DOM，逐步从上往下，直到所有的叶子组件虚拟DOM都被创建好。重新渲染也是这个顺序。
+
+注意首次渲染的时候，创建出来的虚拟DOM会被直接用于创建真实DOM，而后续更新时，REACT会创建新的虚拟DOM，并且和老的虚拟DOM进行比较（对，此时内存中会同时存在2个虚拟DOM），即DIFFING，**这个比较的目的就是找出两个虚拟DOM的最小差异点**，最后用这个差异点去更新真实DOM。最后是浏览器的环节，真实DOM更新后，浏览器会执行REFLOW和REPAINT，简单来说就是重新计算布局以及填充像素，以展示更新后的UI。
+
+`setState`这个HOOK其实就是起到触发的作用，**它是异步的，即它不会修改当前结果中的状态**，比如还是counter的例子，当调用了`setCounter`，它本质上只是触发了再次渲染，并修改了再次渲染时所需的counter值，但是**如果它后面还有代码，拿到的counter依然是当前的渲染结果，除非手动修改它**。
+
+REACT官方文档对此的解释是，每次渲染后，你拿到的state实际上只是它真正的state的一个副本（对于对象来说也是副本），所以你修改副本没有意义，即使你修改成功了，即使你用定时异步的方式修改成功了，只要不触发渲染就没有意义，就不会提现在UI上。
+
+所以应该把组件函数内的状态都视为不可变的，只有通过HOOKS修改后才会发生变动，但是那只会在下次的渲染后才体现，在当前修改后的代码，其状态依然是修改前的结果。
+
+
+
+#### 批量状态更新
+
+调用`setState`多次的时候有以下特性：
+
+- 如果在同步代码内连续调用了多次，REACT会进行批处理，如果通过微任务调用多次（比如Promise的多个then调用），基于版本差异，18及以后会批处理，18以前不会，宏任务内调用肯定不会批处理
+- 由于`setState`是异步的再次渲染，因此设置一个固定值无论多少次，都会以最后一次为准
+- 通过传入`val => val + 1`这样的函数，可以做到累积修改，实际上REACT会在异步时把这些函数依次执行，因此**传入函数后，也不是立刻执行，而是把累积修改加入到异步队列内，然后依次执行**
+
+
+
+#### 对象和集合的状态更新
+
+简单一句话，**对象和集合的修改，都需要返回一个新对象，由于JS的引用特性，REACT实际上需要的是拿到新对象的引用地址，以确保每次渲染后，开发者只能基于新的应用地址进行修改**。
+
+比如对象，假设有如下代码：
+
+```jsx
+const [obj, setObj] = setState({name: 'Arc', age: 10});
+```
+
+还记得状态不可变性吗？我们拿到的状态本质上是一个副本，即使它是对象也一样，直接修改是没有意义的。所以`obj.name = 'Foo'`没有意义，解决办法是：
+
+```jsx
+const newObj = {name: 'Foo', ...obj}; // 只修改必须的属性
+setObj(newObj);
+```
+
+集合也是一样的道理，比如数组，它的方法，有些是原地修改，有些会返回新数组，**我们只能用返回新数组的方式来修改数组**。
+
+
+
+#### JSX语法设计思想（这部分放到最后来，等全部特性都介绍完成后再提）
 
 HTML，CSS和JS，前端三剑客，之前基于关注点分离原则，是分别处理的，写在不同的文件内。但是随着JS功能越来越强大，网页的交互越来越多，JS的主导地位也越来越大。所以基于JS的主导地位，R提出了JSX语法，就是**说在JSX中，HTML沦为了JS的渲染语法糖之类的东西**，目的是确保JS的主导地位，而且确保当JS逻辑变动时，HTML也会被牵连到（R认为JS和HTML就应该保持耦合，因为JS对HTML的操作过于频繁，耦合才是对的，这里再思考一下）。
 
@@ -707,46 +902,6 @@ JSX和关注点分离的讨论，有没有可能，**分离视图和业务逻辑
 另外，JSX语法的本质就是用HTML范式的标记语言去表示视图，而实际上这个视图可以基于硬件平台做变换，比如安卓组件或者IOS组件等等，我们要记住的就是HTML范式本身，然后对应平台的具体标签就可以了。
 
 比如REACT NATIVE，REACT CANVAS等都是这个理念的产物。
-
-##### useState研究
-
-整体思路是这样的：
-
-- useState(initalVal)会返回一个数组，第一个元素是getCurrentVal（可以理解为getter），但是不可直接改变，只能直接使用，第二个元素是setVal，即setter
-- 通过setter修改val，然后把val传入到函数构造器的template内即可
-
-```tsx
-import { useState } from "react";
-
-function MyCpn() {
-  const [count, setCount] = useState<number>(0);
-  setTimeout(() => {
-    setCount(count + 1);
-  }, 1000);
-  
-  return (
-    <h1>Hello React {count}</h1>
-  );
-}
-
-export default MyCpn;
-```
-
-注意到页面会不断更新，即好像反复调用了这个方法（所以不需要用setInterval就能实现无限循环），后面再研究。
-
-无限循环的BUG，**简单来说就是不要在构造函数内不经过事件就调用useState的setState**。调用setState会导致R创建当前组件的副本以生成虚拟DOM进行DOM比较，但是当前组件被重复调用时就会触发再次调用setState，所以循环就来了：
-
-```
-构造阶段setState => 重新构造组件 => 重新执行setState => 重新构造组件 => 重新执行setState => 无限循环
-```
-
-所以setState要用于事件就是这个原因。
-
-TSX下的setter类型声明：
-
-```tsx
-import type { Dispatch } from 'react';
-```
 
 ##### 组件代码规范
 
