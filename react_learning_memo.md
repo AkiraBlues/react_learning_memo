@@ -656,7 +656,7 @@ const renderedDOM = MyCpn(prop1, prop2, prop3);
 
 
 
-#### 添加事件
+#### 事件交互入门
 
 原生HTML通常使用`dom.addEventListener`或者内联事件`<button onclick="clickHandler()">a button</button>`来绑定事件，MDN文档推荐用`addEventListener`的方式绑定事件，但是无论是REACT还是VUE都认为事件应该直接在DOM上可见，以方便阅读，所以JSX虽然也支持通过副作用的方式绑定事件，但是最佳实践也是使用内联事件：
 
@@ -840,6 +840,12 @@ setObj(newObj);
 ```
 
 集合也是一样的道理，比如数组，它的方法，有些是原地修改，有些会返回新数组，**我们只能用返回新数组的方式来修改数组**。
+
+
+
+#### 事件交互进阶
+
+输入框的处理，
 
 
 
