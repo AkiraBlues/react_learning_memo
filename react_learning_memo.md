@@ -843,9 +843,77 @@ setObj(newObj);
 
 
 
-#### 事件交互进阶
+#### 输入框的事件处理和REACT的管理机制
 
-输入框的处理，
+在REACT中，输入框一般是指INPUT框或者TEXTAREA框，它们的标准交互范式如下：
+
+```jsx
+const [text, setText] = useState('default input');
+
+<textarea value={text} onChange={e => setText(e.target.value)} />
+```
+
+注意到，必须要在每次输入发生改变的时候，执行`setText`以触发副作用，看上去很繁琐，但是有必要，以下是测试：
+
+测试1，**把`onChange`完全去掉，只保留`value={text}`，结果是不能输入任何信息。**
+
+测试2，**还是去掉`onChange`，也去掉`value`，改为`defaultValue={text}`，结果是可以输入信息，但是REACT放弃了对此输入框的管理，它的输入信息无法自动同步给其他需要用到的地方**。
+
+为什么会这样呢？
+
+尝试用`useEffect`在测试1场景进行监控，发现没有任何输出，说明虽然不能输入，但是组件也没有重新渲染。输入框本身也没有禁止输入，那么只能得出一个可能，当**在输入框内添加`value={foo}`，而非`defaultValue={foo}`，结果是把此输入框纳入REACT的管理**。**REACT会在修改真实DOM的环节把输入框这个DOM内的`value`属性改为组件内的值**，即：
+
+```js
+inputDom.value = text;
+```
+
+在REACT看来，没有调用`setText`，组件的状态没有变化，因此不需要重新渲染，也就没有执行`useEffect`的必要，但是用户确实输入了，因此需要修正真实DOM，所以无论用户怎么输入，REACT都会顽强地在用户输入后立刻进行修正，以确保用户无法输入。
+
+如何检测到这个环节呢？REACT直接修改了`value`属性，因此只能用JS的属性描述符来进行监控了，需要在`value`属性的`setter`环节进行拦截，具体代码如下：
+
+```jsx
+import { useState, useRef, useEffect } from "react";
+
+export default function Button() {
+  const [input, setInput] = useState('input here');
+  const ref = useRef(null);
+    
+  useEffect(() => {
+    const node = ref.current;
+	if (node) {
+      // Grab the original property descriptor for 'value'
+      const proto = Object.getPrototypeOf(node);
+      const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+
+      // Patch the setter
+      Object.defineProperty(node, 'value', {
+        get: descriptor.get,
+        set(newVal) {
+          console.log('React set value →', newVal);
+          descriptor.set.call(this, newVal);
+        },
+        configurable: true,
+        enumerable: true,
+      });
+
+      // Cleanup: restore original descriptor
+      return () => {
+        Object.defineProperty(proto, 'value', descriptor);
+      };
+    }
+    return;
+  }, []);
+
+  return (
+    <div className="flex justify-center">
+      <span>your input here</span>
+      <input type="text" className="border-1 ml-4" value={input} ref={ref} />
+    </div>
+  );
+}
+```
+
+上述代码中涉及HOOKS的部分，细节后面会提到，这里只需要明白，只能使用属性描述器进行拦截，才能观察到REACT做了什么，执行代码后，尝试修改输入框，会发现REACT在不停地尝试把输入框的value改回组件内原本的值，这样从外部看来输入框虽然可以编辑，但是却不能修改。
 
 
 
