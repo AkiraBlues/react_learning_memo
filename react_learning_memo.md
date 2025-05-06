@@ -888,13 +888,15 @@ REACT官方文档对此的解释是，每次渲染后，你拿到的state实际�
 
 
 
-#### 批量状态更新
+#### 连续的状态更新
 
 调用`setState`多次的时候有以下特性：
 
 - 如果在同步代码内连续调用了多次，REACT会进行批处理，如果通过微任务调用多次（比如Promise的多个then调用），基于版本差异，18及以后会批处理，18以前不会，宏任务内调用肯定不会批处理
 - 由于`setState`是异步的再次渲染，因此设置一个固定值无论多少次，都会以最后一次为准
 - 通过传入`val => val + 1`这样的函数，可以做到累积修改，实际上REACT会在异步时把这些函数依次执行，因此**传入函数后，也不是立刻执行，而是把累积修改加入到异步队列内，然后依次执行**
+
+如果有多个状态，也希望同时更新时，虽然可以多次调用各自的setState，但是当UI交互变得更复杂时，推荐使用`useReducer`以进一步明确操作意图和状态修改之间的关系，这个HOOK后面会提到。
 
 
 
@@ -995,6 +997,216 @@ export default function Button() {
 
 
 
+#### 强制组件渲染和状态重置
+
+之前提到过，在同一个结构的同一个位置，销毁和创建同一个组件，会导致新创建的组件复用旧组件的状态。
+
+但是如果需要强制废弃旧组件的状态呢？参考集合渲染，可以使用`key`关键字来强制标记组件，如果组件的key变动了，则即使是同一位置同一类型，也会被REACT视为新组件：
+
+```jsx
+export default function Demo() {
+  const [trigger, setTrigger] = useState(false);
+  const cpnKey = Math.floor(Math.random() * 1e7); // 搞个随机的KEY就可以强制REACT放弃旧组件的状态
+
+  return (
+    <>
+      <div className="flex justify-center">
+        <button className="border-2" onClick={() => setTrigger(!trigger)}>click trigger</button>
+      </div>
+      {trigger ? (<Counter key={cpnKey} styled={trigger} />) : (<Counter key={cpnKey} styled={trigger} />)}
+    </>
+  );
+}
+
+function Counter({ styled }) {
+  const [counter, setCounter] = useState(0);
+  return (
+    <div className="flex justify-center mb-4">
+      {styled ? (<span>yes it is styled</span>) : (<h4>no style</h4>)}
+      <button className="border-2 px-2 mr-2" onClick={() => setCounter(val => val - 1)}> - </button>
+      <span>{counter}</span>
+      <button className="border-2 px-2 ml-2" onClick={() => setCounter(val => val + 1)}> + </button>
+    </div>
+  )
+}
+```
+
+
+
+#### 多个原子化状态的协同更新
+
+一个丰富交互的UI，**通常在设计时会希望用户按照意图操作，而非按照状态操作**，一个简单的例子，比如注册场景，一个用户友好的注册场景一般是这样的，给出基础表单A，用户输入完成后下一步，跳转到基础表单B，同时把表单A的数据进行校验和保存，之后再进一步跳转到表单C，最后完成注册。在这个场景中，**表单校验，处理，和下一个表单的交互需要在流程上视为同一个状态变化**，而实际上我们应该用不同的状态保存不同的用户数据，这就使得**开发者需要按照一定规则同时操作多个原子化的状态，**
+
+REACT提供了一个HOOKS，叫`useReducer`来解决这个问题，它的使用思路是这样的：
+
+- 最佳场景是每次都需要对多个原子化的状态进行协同操作，所以首先要把组件内所有原子化状态视为一个整体，**每次修改状态时，不应该单独修改某个状态，而应该把所有状态的预期值都进行提交**
+- 编写一个意图处理函数，它应该接收2个参数，一个是当前的组件内所有原子化状态，一个是需要修改的所有状态，为了操作方便，需要修改的所有状态内，还应该额外包含一个业务逻辑的修改意图，这个意图可以理解为CRUD
+- 区分不同的修改意图，对当前的状态进行修改，注意REACT的状态不可变性，返回修改后的新状态作为一个整体对象
+
+伪代码是这样的：
+
+```jsx
+// 意图处理函数最好抽离出来
+function intentionHandler(curState, update) {
+  const intent = update.intent;
+  switch(intent) {
+    case 'intent1': {
+      return {...curState, update.id};
+    }
+    case 'intent2': {
+      return {...curState, update.name, update.age};
+    }
+  }
+}
+
+// 组件
+export default function MyCpn() {
+  const [totalState, setTotalState] = useReducer(intentionHandler, initialTotalState);
+  
+  function doIntent1(id) {
+    setTotalState({intent: 'intent1', id: id});
+  }
+    
+  return (<Jsx />);
+}
+```
+
+操作流程是：
+
+- 绑定交互事件
+- 每个事件都通过一个`setTotalState`（真实名称是`dispatch`）传入需要协同修改的状态
+- 编写处理所有意图所有场景的协同修改函数`intentionHandler`，在里面基于意图进行不同的操作，每个操作最后都应该返回预期的状态
+- 把`intentionHandler`传入到`useReducer`内，以便REACT进行管理
+- REACT会在`setTotalState`时调用`intentionHandler`，进行处理，拿到新状态后，再按照`useState`的流程规划重新渲染
+
+以下给出一个更好的例子，以之前提到的多步骤表单注册为例：
+
+```jsx
+import { useReducer } from 'react';
+
+const STEP_1 = 1;
+const STEP_2 = 2;
+const ACTION_UPDATE = 'update_field';
+const ACTION_NEXT = 'go_next';
+const ACTION_PREV = 'go_back';
+
+const INITIAL_STATE = {
+  step: STEP_1,
+  username: '',
+  password: '',
+  email: '',
+  bio: '',
+  interests: '',
+};
+
+function signUpReducer(state, action) {
+  switch (action.type) {
+    case ACTION_UPDATE:
+      return { ...state, [action.field]: action.value };
+    case ACTION_NEXT:
+      return { ...state, step: STEP_2 };
+    case ACTION_PREV:
+      return { ...state, step: STEP_1 };
+    default:
+      return state;
+  }
+}
+
+function Form1({ form, dispatch }) {
+  function handleChange(e) {
+    dispatch({
+      type: ACTION_UPDATE,
+      field: e.target.name,
+      value: e.target.value
+    });
+  };
+
+  return (
+    <>
+      <div className="space-y-3">
+        <h2 className="text-xl font-bold">Step 1: Account Info</h2>
+        <input name="username" placeholder="Username" className="w-full p-2 border rounded"
+          value={form.username} onChange={handleChange} />
+        <input name="password" type="password" className="w-full p-2 border rounded" placeholder="Password"
+          value={form.password} onChange={handleChange} />
+        <button type="button" onClick={() => dispatch({ type: ACTION_NEXT })}
+          className="bg-blue-500 text-white px-4 py-2 rounded">
+          Next
+        </button>
+      </div>
+    </>
+  )
+}
+
+function Form2({ form, dispatch }) {
+  function handleChange(e) {
+    dispatch({
+      type: ACTION_UPDATE,
+      field: e.target.name,
+      value: e.target.value
+    });
+  };
+  return (
+    <div className="space-y-3">
+      <h2 className="text-xl font-bold">Step 2: Profile Info</h2>
+      <input name="email" type="email" className="w-full p-2 border rounded"
+        placeholder="Email" value={form.email} onChange={handleChange} />
+      <textarea
+        name="bio"
+        placeholder="Short Bio"
+        value={form.bio}
+        onChange={handleChange}
+        className="w-full p-2 border rounded"
+      />
+      <input
+        name="interests"
+        placeholder="Interests (comma-separated)"
+        value={form.interests}
+        onChange={handleChange}
+        className="w-full p-2 border rounded"
+      />
+      <div className="flex justify-between">
+        <button type="button" onClick={() => dispatch({ type: ACTION_PREV })}
+          className="bg-gray-400 text-white px-4 py-2 rounded">
+          Back
+        </button>
+        <button type="submit" className="bg-green-500 text-white px-4 py-2 rounded">
+          Submit
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function SignUpForm() {
+  const [form, dispatch] = useReducer(signUpReducer, INITIAL_STATE);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    console.log(JSON.stringify(form));
+    alert('submitted');
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="max-w-md mx-auto p-4 border rounded-xl shadow space-y-4">
+      {form.step === STEP_1 && (<Form1 form={form} dispatch={dispatch} />)}
+      {form.step === STEP_2 && (<Form2 form={form} dispatch={dispatch} />)}
+    </form>
+  );
+}
+```
+
+编写顺序总结：
+
+1. 设计组件的总体状态以及允许的操作意图
+2. 编写具体的reducer函数，它从新的状态中获取操作意图，基于操作意图和当前的状态，返回一个新的状态
+3. 使用`const [state, dispatch] = useReducer(reducerFn, initialState)`来获取整体状态以及状态修改函数
+4. 组件内绑定事件，基于事件触发dispatch，传入意图和需要修改的状态
+
+相比`useState`来说，多了一个编写reducer函数，以及把状态修改抽象为操作意图的过程。**注意reducer函数必须是纯函数，因为它的入参1是当前状态，入参2是需要修改的新状态，已经图灵完备，所以不应该有任何副作用**。
+
+
+
 #### 兄弟组件间状态共享
 
 注意这里的前提，是兄弟组件的状态共享，即它们有一个相同父组件且到达父组件的路径比较短，在此场景下，直接把需要共享的状态放在父组件就可以了，比如：
@@ -1024,6 +1236,43 @@ function InputBox({ hint, input, setInput }) {
 ```
 
 注意上述代码直接在父组件声明输入内容状态，然后让2个子组件接收和具有修改权限，这样任一子组件的修改都会导致另一个子组件的状态变动。这个设计还是比较常见的，比如一个App，通常会给出多个设置入口，在A入口内的设置会影响到B入口看到的结果。
+
+另外组件共享还引出了一个问题，如何在组件销毁后保存它的私有状态？有几个解决方案：
+
+- 禁止组件销毁，而只做组件隐藏，对于轻度UI来说可以，重度UI会导致性能问题
+- 组件状态放到父组件管理，子组件销毁或者初始化都可以，因为数据在父组件
+- 借用外部存储，比如API，或者浏览器本地缓存等等，比如写邮件或者博客，把信息保存在本地缓存，因此新开编辑窗口也可以展示之前的草稿
+
+
+
+#### 更通用的组件间状态共享方法
+
+兄弟间组件状态共享只能解决一部分问题，比如有以下场景：
+
+```
+        ROOT
+       /   \
+      /     \
+   CHILD1  CHILD2
+             |
+             |
+             |
+           CHILD3
+```
+
+如果需要CHILD1和CHILD3共享数据，那么只能把数据放在ROOT里，那么CHILD2本质上需要透传，这个过程可以更复杂，使得需要透传的组件越来越多，这样组件不仅臃肿而且使得中间层组件和叶子组件的耦合会很严重。
+
+解决办法是使用`Context`，它可以让……后续待补充……
+
+看官方文档的理解：
+
+SECTION组件是父组件，它提供了一个CONTEXT环境，也可以说是CONTEXT的生产者。
+
+父组件提供CONTEXT的标签时，可以默认省略`.Provider`，问了GPT多次，确认了答案，可以省略，默认就是PROVIDER。
+
+HEADING组件是子组件，它是CONTEXT的消费者。
+
+
 
 
 
@@ -1087,25 +1336,7 @@ JSX和关注点分离的讨论，有没有可能，**分离视图和业务逻辑
 
 比如REACT NATIVE，REACT CANVAS等都是这个理念的产物。
 
-##### 组件代码规范
 
-我自己觉得这种写法很好：
-
-```tsx
-function MyCpn(props) {
-  // internal state
-  // internal function
-  return (<>template</>);
-}
-
-export default MyCpn;
-```
-
-就是说充分利用JS的语言特性，在一个大的组件构造函数内声明函数，如果需要可以外部引入通用函数，然后最后输出这个函数作为组件，函数返回值就是组件模板。
-
-**组件使用的时候统一首字母大写，这是为了和HTML标签做区隔**。
-
-当然也可以多个组件写在一起，此时组件都很小，写在一起比较好维护，然后导出就要用命名导出。
 
 ##### 组件和纯函数
 
