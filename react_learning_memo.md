@@ -708,13 +708,13 @@ rootNode.addEventListener('click', (event) => {
 
 
 
-#### 作为纯函数的组件的有状态性以及HOOKS入门（非常重要）
+#### 组件的状态性以及HOOKS入门（非常重要）
 
 HTTP协议是无状态的，但是在WEB2之后通常都需要服务端记录用户状态，以提供个性化服务，所以产生了cookie和session。
 
 同样的道理，REACT倾向于开发者使用纯函数组件，但同时也意味着**组件本身是无状态的**，它在首次渲染后只能保持不变，即使它具有一定的交互能力，但本质上它无法记录和用户的交互历史，并在重新渲染后体现出这个历史。而显然在WEB2时代之后丰富的UI交互能力是前端领域的发展趋势之一。
 
-所以REACT团队设计了一套HOOKS，来让组件具有状态，但是这个状态基本上是在组件内部的，因此是一个可控制的副作用。从严格意义上看，组件不再是纯函数，因为它的状态变量一直存活到了下次渲染，直到组件被彻底销毁。而从广义上看，组件的状态只在组件内部使用（大部分时候），因此也可以把它视为组件的一部分，所以组件依然是纯函数。
+所以REACT团队设计了一套HOOKS，来让组件具有状态，但是这个状态基本上是在组件内部的，因此是一个可控制的副作用。从严格意义上看，组件不再是纯函数，因为它的状态变量一直存活到了下次渲染，直到组件被彻底销毁。而从广义上看，组件的状态只在组件内部使用（大部分时候），因此也可以把它视为组件的一部分（实际上不是，后续会解释），所以组件依然是纯函数。
 
 **REACT的HOOKS看上去有很多，但实际上归纳总结后，可以找出它们的核心设计思路：**
 
@@ -790,6 +790,78 @@ function CounterCpn({counter, setCounter}) {
 }
 ```
 
+虽然组件的状态是跟随组件的，这表示如果组件被销毁了则组件的状态也会跟着销毁，但是下面的代码实际上会保留组件的状态：
+
+```jsx
+export default function Demo() {
+  const [trigger, setTrigger] = useState(false);
+
+  return (
+    <>
+      <div className="flex justify-center">
+        <button className="border-2" onClick={() => setTrigger(!trigger)}>click trigger</button>
+      </div>
+      {trigger ? (<Counter styled={trigger} />) : (<Counter styled={trigger} />)}
+    </>
+  );
+}
+
+function Counter({ styled }) {
+  const [counter, setCounter] = useState(0);
+  return (
+    <div className="flex justify-center mb-4">
+      {styled ? (<span>yes it is styled</span>) : (<h4>no style</h4>)}
+      <button className="border-2 px-2 mr-2" onClick={() => setCounter(val => val - 1)}> - </button>
+      <span>{counter}</span>
+      <button className="border-2 px-2 ml-2" onClick={() => setCounter(val => val + 1)}> + </button>
+    </div>
+  )
+}
+```
+
+注意上述代码的组件结构：
+
+```
+|---ROOT
+  |---DIV
+  |  |---BUTTON
+  |---[COUNTER_CPN1 || COUNTER_CPN2]
+```
+
+通过条件渲染，在同一个位置展示2个相同类型，但是不同实例的组件，如果按照之前的观点，组件的状态是跟随组件生命周期的，所以上述结构中，2个COUNTER应该具有各自的状态，当组件1销毁切换到组件2时，组件1的状态应该也销毁，组件2的状态应该从0开始。
+
+但是实际是什么呢？看上去组件2“继承”了组件1的状态！实际是，组件的状态并不是保存在组件内的，而是保存在REACT渲染的虚拟DOM内的，**如果在同一个结构的相同位置有相同类型的组件被销毁和创建，则REACT会视为这个位置并没有组件的实际销毁，而是组件的过渡，因此REACT会让新创建的组件使用上一个销毁组件的状态**。
+
+**注意一定要同一个结构的相同位置**，所以如果上述代码的组件结构有轻微变动，比如：
+
+```
+COUNTER_CPN1 => <div>COUNTER_CPN2</div>
+```
+
+或者：
+
+```
+<section>COUNTER_CPN1</section> => <div>COUNTER_CPN2</div>
+```
+
+那么对于REACT来说，上述状态变动后，新创建的组件结构上就变化了，比如多了一层节点，或者整个节点本身的父标签更换了，即使外部看上去一样，REACT也会把这个行为视为组件的销毁和创建，因而不会保留销毁组件的状态。
+
+还有一个隐藏的问题，组件类型必须相同，以下面的代码为例，每次执行后实际上会产生不同类型的组件：
+
+```jsx
+function MyCpn() {
+  function TempChild() {
+    return <span>temp child</span>;
+  }
+  
+  return (
+    <div><TempChild /></div>
+  );
+}
+```
+
+这个就是**不应该在组件内定义子组件**的原因，因为组件函数内定义的子组件，在REACT看来每次执行后它都是一个新的组件，属于不同的类型，**因为组件函数也是有引用地址的，REACT通过比较组件函数的引用地址来判断组件是否相同类型**。
+
 
 
 #### 组件渲染机制和状态不可变性
@@ -797,12 +869,16 @@ function CounterCpn({counter, setCounter}) {
 总体渲染机制可以简化为：
 
 ```
-触发 => 创建虚拟DOM => [DIFFING] => 修改真实DOM 
+触发 => [执行组件函数创建虚拟DOM] => DIFFING => 修改真实DOM 
 ```
+
+触发过程不一定是通过setState触发，实际上对输入框的修改，或者对表单标签的交互，都会触发REACT开始新一轮渲染机制。
+
+注意创建虚拟DOM不是必须的，因为REACT会保存组件的状态，**如果组件是无状态的，则REACT不会在首次执行组件函数后后再次执行**。**如果组件是有状态的，则REACT会帮助管理其状态，并且判断只有在状态变化后才再次执行函数**。
 
 执行组件函数会产生虚拟DOM，**它的顺序是从父到子的**，如果是首次渲染，会先创建根节点虚拟DOM，然后发现它包含子组件函数，进一步执行子组件函数以创建子组件虚拟DOM，逐步从上往下，直到所有的叶子组件虚拟DOM都被创建好。重新渲染也是这个顺序。
 
-注意首次渲染的时候，创建出来的虚拟DOM会被直接用于创建真实DOM，而后续更新时，REACT会创建新的虚拟DOM，并且和老的虚拟DOM进行比较（对，此时内存中会同时存在2个虚拟DOM），即DIFFING，**这个比较的目的就是找出两个虚拟DOM的最小差异点**，最后用这个差异点去更新真实DOM。最后是浏览器的环节，真实DOM更新后，浏览器会执行REFLOW和REPAINT，简单来说就是重新计算布局以及填充像素，以展示更新后的UI。
+注意首次渲染的时候，创建出来的虚拟DOM会被直接用于创建真实DOM，而后续更新时，REACT会在必要时创建新的虚拟DOM，并且和老的虚拟DOM进行比较（对，此时内存中会同时存在2个虚拟DOM，但是鉴于JS的引用特性，对于没有必要更新的组件来说，它的上一个版本的虚拟DOM会被复用，因此这2个虚拟DOM往往会有交集），即DIFFING，**这个比较的目的就是找出两个虚拟DOM的最小差异点**，最后用这个差异点去更新真实DOM。最后是浏览器的环节，真实DOM更新后，浏览器会执行REFLOW和REPAINT，简单来说就是重新计算布局以及填充像素，以展示更新后的UI。
 
 `setState`这个HOOK其实就是起到触发的作用，**它是异步的，即它不会修改当前结果中的状态**，比如还是counter的例子，当调用了`setCounter`，它本质上只是触发了再次渲染，并修改了再次渲染时所需的counter值，但是**如果它后面还有代码，拿到的counter依然是当前的渲染结果，除非手动修改它**。
 
@@ -840,6 +916,8 @@ setObj(newObj);
 ```
 
 集合也是一样的道理，比如数组，它的方法，有些是原地修改，有些会返回新数组，**我们只能用返回新数组的方式来修改数组**。
+
+由于对象和集合可以有很深的结构，**在创建对象状态时，尽量做到扁平化，集合也是同样的道理**。
 
 
 
@@ -914,6 +992,38 @@ export default function Button() {
 ```
 
 上述代码中涉及HOOKS的部分，细节后面会提到，这里只需要明白，只能使用属性描述器进行拦截，才能观察到REACT做了什么，执行代码后，尝试修改输入框，会发现REACT在不停地尝试把输入框的value改回组件内原本的值，这样从外部看来输入框虽然可以编辑，但是却不能修改。
+
+
+
+#### 兄弟组件间状态共享
+
+注意这里的前提，是兄弟组件的状态共享，即它们有一个相同父组件且到达父组件的路径比较短，在此场景下，直接把需要共享的状态放在父组件就可以了，比如：
+
+```jsx
+import { useState } from "react";
+
+export default function CpnShareDemo() {
+  const [input, setInput] = useState('input here');
+
+  return (
+    <>
+      <InputBox hint="first input box" input={input} setInput={setInput} />
+      <InputBox hint="second input box" input={input} setInput={setInput} />
+    </>
+  );
+}
+
+function InputBox({ hint, input, setInput }) {
+  return (
+    <div className="flex justify-center mb-4">
+      <span>{hint}</span>
+      <input type="text" className="border-1 ml-4" value={input} onChange={e => setInput(e.target.value)} />
+    </div>
+  )
+}
+```
+
+注意上述代码直接在父组件声明输入内容状态，然后让2个子组件接收和具有修改权限，这样任一子组件的修改都会导致另一个子组件的状态变动。这个设计还是比较常见的，比如一个App，通常会给出多个设置入口，在A入口内的设置会影响到B入口看到的结果。
 
 
 
