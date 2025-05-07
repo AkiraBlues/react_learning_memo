@@ -1262,17 +1262,59 @@ function InputBox({ hint, input, setInput }) {
 
 如果需要CHILD1和CHILD3共享数据，那么只能把数据放在ROOT里，那么CHILD2本质上需要透传，这个过程可以更复杂，使得需要透传的组件越来越多，这样组件不仅臃肿而且使得中间层组件和叶子组件的耦合会很严重。
 
-解决办法是使用`Context`，它可以让……后续待补充……
+解决办法是使用`Context`，它的设计思路是这样的：
 
-看官方文档的理解：
+- REACT的设计思路是状态都要放在组件内部以防止副作用，所以**这个context在使用时也应该放在某个组件内部**而非像VUE的STORE模式那样是一个完全独立的模块
 
-SECTION组件是父组件，它提供了一个CONTEXT环境，也可以说是CONTEXT的生产者。
+- 区分出上下级关系，因为REACT建议单向的数据流通，因此上级是context的提供者，负责创建context作用域，下级是context的消费者（使用者），**只有在context内的下级组件才能消费** ，如果下级组件不在context作用域内，则只能拿到默认值，无法感知到context变动
 
-父组件提供CONTEXT的标签时，可以默认省略`.Provider`，问了GPT多次，确认了答案，可以省略，默认就是PROVIDER。
+- 使用`createContext`构造一个**桥梁**，通常它需要单独一个文件，以便上级组件和下级组件都可以单独引入
+- 上级组件使用context桥梁划定作用域并注入数据或者方法（如果可以放权下级组件进行修改时），在作用域内的下级组件可以消费，之外的不行，**context桥梁对于上级组件来说就是一个容器组件**，或者叫作用域
+- 下级组件引入context桥梁并使用`useContext`订阅（消费）它，以获取上级组件注入的数据和方法
 
-HEADING组件是子组件，它是CONTEXT的消费者。
+样例代码：
 
+```jsx
+import { createContext, useContext, useState } from "react";
 
+// themeContext.js，建议单独一个文件
+const THEME_DARK = "theme_dark";
+const THEME_LIGHT = "theme_light";
+const ThemeContext = createContext(THEME_LIGHT); // 这个就是context桥梁
+
+// 上级组件
+export default function ContextDemo() {
+  const [theme, setTheme] = useState(THEME_DARK);
+
+  function changeTheme() {
+    setTheme(theme === THEME_DARK ? THEME_LIGHT : THEME_DARK);
+  }
+
+  return (
+    <>
+      <h1>PARENT TITLE</h1>
+      <button className="border-2 px-1" onClick={changeTheme}>change theme</button>
+      <ThemeContext value={theme}> {/* 这里把context桥梁作为单向的theme获取通道 */}
+        <Child />
+      </ThemeContext>
+    </>
+  );
+}
+
+// 下级组件
+function Child() {
+  const curTheme = useContext(ThemeContext); // 下级组件只能拿到上级组件传递过来的值
+  return (
+    <h4>current theme is {curTheme}</h4>
+  );
+}
+```
+
+注意，上级组件引入的context桥梁，**本质上是省略了`.Provider`的容器组件**，即上述代码的上级组件也可以写为`<ThemeContext.Provider>`。上级组件的JSX内可以设置多个这样的容器组件以创建多个作用域，不过一般来说context会适用于购物车，用户登录状态，主题，系统语言，前端路由等适用于全局的场景。但是如果上级通过`value`注入了修改函数，则意味着任何下级都可以修改它，因此面临潜在的混乱场景。
+
+context就是一个桥梁，一个项目可以有不同的桥梁，负责传递不同类型的数据，也可以基于业务进行分类。当然最简单的做法是把所有需要共享的数据都放在一个context内，然后这个context放在根组件位置以便所有子组件都可以消费。
+
+还有很多很灵活的用法，比如组件相关的context，或者某个业务相关的context，它内部或许有复杂结构，或许需要在不同的深度子组件各自修改一部分，此时就可以结合context和reducer，基于意图来操作一个复杂状态。
 
 
 
