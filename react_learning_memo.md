@@ -720,6 +720,7 @@ HTTP协议是无状态的，但是在WEB2之后通常都需要服务端记录用
 
 1. **把代码（业务逻辑），或者状态，进行保存，使得它们可以独立于组件的重新渲染**
 2. **控制组件重新渲染的时机，可以基于各种条件，或者对状态的观察，或者干脆不再重新渲染**
+3. 只能在组件内部声明
 
 后续学习的所有HOOKS都可以使用上述思路进行分析。比如最简单的一个HOOK，`useState`，它的作用是这样：
 
@@ -763,7 +764,9 @@ export default function Button() {
 
 上述代码最核心的就是`const [counter, setCounter] = useState(0)`，这里的`useState`就是一个HOOK，它支持传入一个值，或者一个函数调用，当然也可以直接把函数作为值传入。如果传入函数调用，则它表示运算这个函数并获得其结果作为初始值。
 
-之后它返回一个数组，第一个元素是当前值，没有任何封装，第二个元素是一个函数，它的作用是修改当前值并在修改后计划一次重新渲染，由此也可以看出上述代码中的`setCounter`是一个异步函数，虽然counter是同步修改的但是它不会在组件UI上提现，只有重新渲染后才会提现。
+之后它返回一个数组，第一个元素是当前值，没有任何封装，第二个元素是一个函数，它的作用是修改当前值并在修改后计划一次重新渲染，由此也可以看出上述代码中的`setCounter`是一个异步函数，虽然counter是同步修改的但是它不会在组件UI上提现，只有重新渲染后才会体现。
+
+还注意上述代码的JSX部分使用了counter的值，但是不使用也可以，**REACT没有SVELTE的静态语法分析，也没有VUE的依赖搜集，即使JSX内不使用counter，调用`setCounter`依然会触发重新渲染，所以在某些时候可以把`setCounter`视为一个只触发渲染，不保存数据的功能函数**。
 
 注意到`setCounter`可以接收一个具体的值，也可以接收一个函数，即`val = > val + 1`表示对当前值进行修改，并返回修改的结果。
 
@@ -1310,11 +1313,230 @@ function Child() {
 }
 ```
 
-注意，上级组件引入的context桥梁，**本质上是省略了`.Provider`的容器组件**，即上述代码的上级组件也可以写为`<ThemeContext.Provider>`。上级组件的JSX内可以设置多个这样的容器组件以创建多个作用域，不过一般来说context会适用于购物车，用户登录状态，主题，系统语言，前端路由等适用于全局的场景。但是如果上级通过`value`注入了修改函数，则意味着任何下级都可以修改它，因此面临潜在的混乱场景。
+`createContext`不是一个HOOK，所以它可以在组件外声明。它返回的就是context桥梁，当上级组件导入这个桥梁并作为容器标签使用时，**本质上是省略了`.Provider`的容器组件**，即上述代码的上级组件也可以写为`<ThemeContext.Provider>`。上级组件的JSX内可以设置多个这样的容器组件以创建多个作用域，不过一般来说context会适用于购物车，用户登录状态，主题，系统语言，前端路由等适用于全局的场景。但是如果上级通过`value`注入了修改函数，则意味着任何下级都可以修改它，因此面临潜在的混乱场景。
+
+下级组件使用`useContext(桥梁)`来监听和访问共享数据，这个`useContext`是一个HOOK所以它只能在组件内使用。
 
 context就是一个桥梁，一个项目可以有不同的桥梁，负责传递不同类型的数据，也可以基于业务进行分类。当然最简单的做法是把所有需要共享的数据都放在一个context内，然后这个context放在根组件位置以便所有子组件都可以消费。
 
 还有很多很灵活的用法，比如组件相关的context，或者某个业务相关的context，它内部或许有复杂结构，或许需要在不同的深度子组件各自修改一部分，此时就可以结合context和reducer，基于意图来操作一个复杂状态。
+
+
+
+#### REACT唯一可变性设计`useRef`
+
+`useRef`是REACT的唯一可变性HOOK，它的特性如下：
+
+- 状态的独立保存
+- 单独修改它永远不会触发再次渲染
+- 因为永远不会再次渲染，所以REACT只能打破原则采取可变性设计，它是所有HOOKS中唯一采用了可变性设计的
+- 此HOOK只在首次渲染时执行一次，换言之它创建的对象的引用地址是固定的（严格模式下组件会渲染销毁再渲染，因此它也会执行2次）
+
+简单用例：
+
+```jsx
+import { useRef, useState } from 'react';
+
+export default function UseRefDemo() {
+  const feedCount = useRef(0);
+  const [, setTrigger] = useState(false); // 这个写法表示只是需要强制渲染，但并不需要用到具体值
+
+  function forceRerender() {
+    setTrigger(val => !val);
+  }
+
+  return(
+    <>
+      <button className="border-2 px-1 mr-2" onClick={() => feedCount.current++} >feed</button>
+      <span>prev feed count is {feedCount.current}</span>
+      <button className="border-2 px-1 ml-2" onClick={forceRerender}>update feed count</button>
+    </>
+  );
+}
+```
+
+上述代码通过`useRef`创建了一个可变性对象，所有REF对象都有唯一默认根属性叫`current`，即使初始传入的是对象也一样，它只会变成`current`属性对应的对象。之后可以通过事件或者其他方法进行修改，但是因为它是可变的，所以REACT默认不会触发重新渲染。如果需要强制重新渲染，可以使用`useState`频繁修改一个不使用的变量即可。
+
+`useRef`不仅可以保存数据，还可以保存函数，比如定时函数，或者轮询函数等，以便手动控制倒计时或者轮询，比如这个例子：
+
+```jsx
+import { useState, useRef } from 'react';
+
+export default function Stopwatch() {
+  const [startTime, setStartTime] = useState(null);
+  const [now, setNow] = useState(null);
+  const intervalRef = useRef(null);
+
+  function handleStart() {
+    setStartTime(Date.now());
+    setNow(Date.now());
+
+    clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(() => {
+      setNow(Date.now());
+    }, 10);
+  }
+
+  function handleStop() {
+    clearInterval(intervalRef.current);
+  }
+
+  let secondsPassed = 0;
+  if (startTime != null && now != null) {
+    secondsPassed = (now - startTime) / 1000;
+  }
+
+  return (
+    <>
+      <h1>Time passed: {secondsPassed.toFixed(3)}</h1>
+      <button onClick={handleStart}>
+        Start
+      </button>
+      <button onClick={handleStop}>
+        Stop
+      </button>
+    </>
+  );
+}
+```
+
+基于`useRef`的状态可变性以及不触发重新渲染，REACT设计了一个`ref`属性**用于在组件内获取组件自身的DOM对象或者子组件的DOM对象**。它的用法是这样的：
+
+- 组件内声明一个`const domRef = useRef(null)` 用于存储DOM对象
+- 在JSX内，对需要注入的DOM添加一个`ref = {domRef}`标记
+- 组件渲染后，真实DOM挂载时（注意不是在全部过程完成，而是刚刚在真实DOM挂载后），对应标记了ref属性的DOM，会自动把它自身注入到`domRef`变量内，这样当前渲染就拿到了DOM
+
+样例代码：
+
+```jsx
+import { useRef, useState } from 'react';
+
+export default function UseRefDemo() {
+  const domRef = useRef(null);
+  const [counter, setCounter] = useState(0);
+
+  const newId = Math.floor(Math.random() * 1e7);
+  console.log('newId is', newId);
+  if (domRef.current) {
+    console.log(domRef.current.id); // 后续渲染时ref存储了上次的DOM，因此会执行这里，注意ID是上次渲染的结果
+    console.log(domRef.current);
+  } else {
+    console.log('first render'); // 首次渲染时会执行此处
+  }
+
+  return(
+    <>
+      <button className="border-2 px-1 mr-2" onClick={() => setCounter(val => val - 1)} > - </button>
+      <span>counter is</span><input className="border-2 px-1 ml-2" key={newId} id={newId} ref={domRef} value={counter} />
+      <button className="border-2 px-1 ml-2" onClick={() => setCounter(val => val + 1)}> + </button>
+    </>
+  );
+}
+```
+
+上述代码的执行顺序是这样的：
+
+1. 首次渲染执行`useRef`，`domRef`初始化为`{current: null}`
+2. JSX转换为虚拟DOM并挂载为真实DOM，此时执行`ref={domRef}`，把它修改为指向本轮渲染的真实DOM
+3. 用户点击按钮触发`setState`，引发重新渲染
+4. 重新渲染时，`console.log`展示的是上次挂载的真实DOM，**如果当前的DOM发生了销毁（比如通过key的变动），则不会指向当前的DOM**
+5. 执行完成，获取JSX，转为虚拟DOM，并挂载真实DOM，此时执行`ref={domRef}`，把它修改为指向本轮渲染的真实DOM
+
+所以当绑定DOM时，不应该在组件函数内直接通过`useRef`获取DOM，因为它拿到的是上轮渲染完成的DOM，这个问题需要用一个新的HOOK来解决，后续会提到。
+
+如果需要对一个列表的DOM进行存储，则可以这样操作：
+
+1. 声明一个useRef对象，可以用map或者其他方式存储
+2. 列表DOM采用map方法返回JSX，在返回的JSX内，通过`ref(node => { //manual save or clean up})`来处理单独节点的保存和销毁问题，注意一定要加上销毁的逻辑，因为即使一个最简单的TODO LIST都需要频繁创建新的列表和销毁列表，如果不销毁则会导致内存泄漏
+3. 当列表DOM加载后，ref的函数内node入参返回该DOM节点，如果它销毁，则此node会返回NULL，可以基于这个进行存储或者销毁的操作
+
+样例代码：
+
+```jsx
+import { useRef, useState } from 'react';
+
+export default function UseRefDemo() {
+  const domRef = useRef(new Map());
+  const [list, setList] = useState([
+    {id: 1, name: 'book'},
+    {id: 2, name: 'pencil'},
+    {id: 3, name: 'paper'},
+    {id: 4, name: 'eraser'},
+    {id: 5, name: 'ruler'}
+  ]);
+
+  function deleteFromList(id) {
+    const filtered = list.filter(ele => ele.id !== id);
+    setList(filtered);
+  }
+
+  function saveListNode(id, node) { // 这里用map保存列表DOM，key是列表元素的ID
+    if (domRef.current) {
+      if (node) {
+        domRef.current.set(id, node);
+      } else {
+        domRef.current.delete(id);
+      }
+      console.log(domRef.current);
+    }
+  }
+
+  return(
+    <div className="pl-10">
+      <h4>item list</h4>
+      <ul className="list-disc pl-10">
+        {list.map(ele => {
+          return (
+            <div className="flex mb-4" ref={node => saveListNode(ele.id, node)}>
+              <li key={ele.id}>{ele.name}</li>
+              <button className="border-2 px-1 ml-4 hover:cursor-pointer hover:bg-blue-100 transition duration-200" onClick={() => deleteFromList(ele.id)}>
+                delete me
+              </button>
+            </div>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+```
+
+上述代码，在列表元素中用`ref={node => saveListNode(ele.id, node)}`处理列表的DOM引用问题，当用户点击按钮删除列表元素时，事件是这样发生的：
+
+1. 创建删除后的新列表，并触发渲染
+2. 渲染完成，DIFFING完成，REACT准备操作真实DOM
+3. REACT操作真实DOM，移除对应要删除的节点，**并执行两次ref函数（对的你没看错，即使通过KEY保留不需要操作的DOM，也会执行2次）**，第一次会传入null以执行删除旧节点的逻辑，第二次会传入当前刚刚挂载好的新节点以重新保存
+
+简单来说，**`ref`的回调函数对于任何DOM都会执行两次，即使这个DOM通过KEY绑定了，而且没有任何变化**。REACT这样做是为了100%保证ref绑定的节点一定是最新的。
+
+如果需要获取子组件的DOM对象，则子组件可以把父组件的domRef作为属性传入，并且设置好即可，比如：
+
+```jsx
+function ParentCpn() {
+  const childDomRef = useRef(null);
+  
+  return (
+    <ChildCpn domRef={childDomRef} />
+  );
+}
+
+function ChildCpn({domRef}) {
+  return (
+    <input type="text" ref={domRef} />
+  )
+}
+```
+
+在REACT18及之前还有一个`forwardRef`函数用于解决上述问题，从19开始已经进入废弃，后续也不会再用。
+
+
+
+
+
+逃生舱本质上就是类似REACT的后门，就是一些增加开发者权限的接口，主要是针对副作用的， 所以还是HOOKS的特性：
+
+- 函数或者状态的独立保存
+- 控制组件渲染时机
 
 
 
