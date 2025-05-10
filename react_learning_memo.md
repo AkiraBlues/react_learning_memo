@@ -1655,7 +1655,7 @@ function Cpn2() {
 
 
 
-#### `useEffect`追加阅读
+#### `useEffect`--追加阅读
 
 [这篇文章](https://overreacted.io/a-complete-guide-to-useeffect/#dont-lie-to-react-about-dependencies)解释得很好。
 
@@ -1663,15 +1663,91 @@ function Cpn2() {
 
 - 每次渲染，组件内的状态，组件内的函数，函数内引用的组件内变量，其实都是不可变的，即使函数是异步的，在回调开始前组件进入了下一轮渲染，上一轮的函数内使用的组件内变量依然还是上一轮的，不会串台到下一轮，用作者的话来说，**函数只能看见它所在这轮渲染创造出的变量，看不到上一轮也看不到下一轮**
 - `useEffect`内的副作用函数也是函数，因此也受制于这个规则，**副作用函数和它的清理函数也只能看见它所在这轮渲染创造出的变量**
-- 一般来说，应该把依赖的部分写完整，但是，还有一个策略是**对副作用函数本身进行优化，使得它需要的依赖变少，但是也同样可以完成任务**，某些场景下，还可以实现副作用函数不受状态影响，但又可以感知到新的状态
-- `const [state, dispatch] = useReducer(reducerFn, initialState)`，注意，**`dispatch`也是一个不会变化的状态修改函数，因此可以让`useEffect`直接依赖它，以实现在副作用内修改组件状态，但同时保持副作用函数不重开**
-- 
+- 原则1：应该把依赖的部分写完整，不然会导致副作用函数的基础功能不正常
+- 原则2：在不违反原则1的前提下，可以**对副作用函数本身进行优化，使得它需要的依赖变少，但是也同样可以完成任务**
+- 原则2的核心，`const [state, dispatch] = useReducer(reducerFn, initialState)`，注意，**`dispatch`也是一个不会变化的状态修改函数，因此可以让`useEffect`直接依赖它，以实现在副作用内修改组件状态，但同时保持副作用函数不重开**
 
 这篇文章之所以重要，是因为它解决了最常见的一个开发场景：
 
 1. 使用`useEffect`获取API数据
 2. 在获取数据后，依然在`useEffect`内，修改组件状态以把数据展示到UI上
 3. 因为在`useEffect`内修改了状态，所以理论上需要把这些状态添加到依赖内，但实际上业务层不需要，所以可以用`dispatch`来防止在`useEffect`内修改状态的行为会打乱副作用函数
+
+以下给出一个定时器的例子，它不间断地修改一个COUNTER，但是每次修改不会触发定时器重新启动，而且还支持在保持定时器的同时修改其他状态以更改COUNTER的计数规则：
+
+```jsx
+import { useReducer, useEffect } from 'react';
+
+function loopReducer(curState, payload) {
+  switch (payload.action) {
+    case 'default': {
+      return { ...curState, counter: curState.counter + curState.step }
+    }
+    case 'change_step': {
+      return { ...curState, step: payload.step };
+    }
+    case 'modify_counter': {
+      return { ...curState, counter: payload.counter }
+    }
+  }
+}
+export default function UseEffectDemo3() {
+  const [state, dispatch] = useReducer(loopReducer, { step: 1, counter: 0 });
+  useEffect(() => {
+    console.log('begin loop');
+    const loop = setInterval(() => {
+      dispatch({
+        action: 'default',
+      });
+    }, 1000);
+    return () => clearInterval(loop);
+  }, [dispatch]);
+
+  function resetCounter() {
+    dispatch({ action: 'modify_counter', counter: 0 });
+  }
+
+  function changeStep() {
+    const step = state.step;
+    dispatch({ action: 'change_step', step: 0 - step });
+  }
+
+  function bumpStep() {
+    const step = state.step;
+    const newStep = step > 0 ? step + 1 : step - 1;
+    dispatch({ action: 'change_step', step: newStep });
+  }
+
+  function resetStep() {
+    const step = state.step;
+    const newStep = step > 0 ? 1 : -1;
+    dispatch({ action: 'change_step', step: newStep });
+  }
+
+  return (
+    <>
+      <h4 className="text-center">counter is {state.counter}</h4>
+      <div className="flex justify-center">
+        <MyButton text="reset counter" clickHandler={resetCounter} />
+        <MyButton text="reverse speed" extraClass="ml-2" clickHandler={changeStep} />
+        <MyButton text="speed up" extraClass="ml-2" clickHandler={bumpStep} />
+        <MyButton text="reset speed" extraClass="ml-2" clickHandler={resetStep} />
+      </div>
+    </>
+  )
+}
+
+
+function MyButton({ text, clickHandler, extraClass }) {
+  return (
+    <button className={`border-2 px-2 py-0.5 hover:cursor-pointer ${extraClass}`} onClick={clickHandler}>
+      {text}
+    </button>
+  );
+}
+```
+
+
 
 
 
