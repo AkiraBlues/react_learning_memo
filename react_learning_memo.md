@@ -932,7 +932,7 @@ setObj(newObj);
 
 
 
-#### 输入框的事件处理和REACT的管理机制
+#### 输入框的事件处理和REACT的管理机制（非常重要）
 
 在REACT中，输入框一般是指INPUT框或者TEXTAREA框，它们的标准交互范式如下：
 
@@ -1039,6 +1039,29 @@ function Counter({ styled }) {
   )
 }
 ```
+
+另外，如果在一个组件内声明一个不需要使用的变量，并且反复修改它，也会触发强制渲染：
+
+```jsx
+import { useState, useEffect } from 'react';
+
+export default function ForceRender() {
+  const [, setTrigger] = useState(false);
+
+  useEffect(() => { // 这个暂时理解为可以观察组件是否重新渲染
+    console.log('cpn rendered');
+  });
+
+  return (
+    <>
+      <h1>this is a force render cpn</h1>
+      <button onClick={() => setTrigger(val => !val)} className="border-2 px-1" >clike me to force render</button>
+    </>
+  )
+}
+```
+
+上述代码，虽然没有用到任何状态变量，但是通过一个按钮不停修改状态变量，也会触发组件的强制渲染。
 
 
 
@@ -1326,6 +1349,29 @@ function Child() {
 context就是一个桥梁，一个项目可以有不同的桥梁，负责传递不同类型的数据，也可以基于业务进行分类。当然最简单的做法是把所有需要共享的数据都放在一个context内，然后这个context放在根组件位置以便所有子组件都可以消费。
 
 还有很多很灵活的用法，比如组件相关的context，或者某个业务相关的context，它内部或许有复杂结构，或许需要在不同的深度子组件各自修改一部分，此时就可以结合context和reducer，基于意图来操作一个复杂状态。
+
+
+
+#### REACT的父子组件通信设计
+
+VUE对于副作用的理解和REACT不一样，所以这就使得从VUE转过来学习REACT的人，在理解REACT的父子组件通信设计上，会有障碍，这里梳理一下，在VUE里面，父子组件通过监听，或者事件来沟通：
+
+- 父通知子的场景下，父组件把一个属性传递给子组件，子组件监听这个属性，当它变化时，执行代码，不管这个代码是否有副作用
+- 子通知父的场景下，要么子组件冒泡一个事件，父组件捕获并处理，要么父组件直接把对应的通知函数传递给子组件，子组件在需要的场合进行调用，并注入参数，之后执行的逻辑都会是父组件的逻辑
+
+**VUE的思路是：监听事件 => 事件发生 => 执行函数 => 修改状态 => 结果，REACT关注的是状态 => 结果**，可以看出VUE更关注过程，而REACT需要开发者摒弃这种思维，直接从状态和结果的角度思考：
+
+- 一般的状态变化，如果它直接影响UI，则在编写JSX的时候考虑到所有可能的状态和对应的UI，做好声明式即可
+- 如果状态变化需要触发额外代码，通常这部分代码要作为副作用来看待，因此应该使用`useEffect`来管理
+- 父通知子时，还是通过属性传递给子，子基于属性可能的值，设置对应的UI，做好声明式，或者需要触发副作用时，使用`useEffect`，把父的属性作为依赖，执行副作用代码，如果需要跳过首次渲染，加一个`useRef`记录是首次渲染
+- 子通知父时，把父的副作用函数传入，子直接调用即可，之后父有2种处理逻辑，1是父的副作用函数是`setState`，子修改后会直接触发父的状态变化和重新渲染，2是父的副作用函数是`useEffect`，则子直接调用就类似事件的处理
+
+总结：编写REACT的父子组件通信时，尽量从**状态 => 结果**的角度思考，建议的思考顺序：
+
+1. 遵循自上而下单向的数据流，父子通信也尽量不要违背这个原则
+2. 为什么需要父子通信，它用来解决什么问题
+3. 父子通信后，什么状态变化了
+4. 如何把状态变化体现在UI或者副作用函数上
 
 
 
@@ -1749,6 +1795,75 @@ function MyButton({ text, clickHandler, extraClass }) {
 
 
 
+#### `useEffect`--常见设计范式
+
+- 计算属性不需要使用它
+- 事件交互不需要使用它
+- 重置所有状态，要么通过`useReducer`手动实现，要么修改子组件的`key`
+- 一些数据请求应该通过事件交互而非自动执行
+- 首次的数据请求可以放到`useEffect`内
+- 后续的数据请求如果依赖事件或者状态变化，则需要处理好debounce（防抖）或throttle（节流），并做好在多个请求同时发生时，如何避免返回数据的乱序问题（通常称为race condition）
+- 全局初始化一次的业务逻辑，可以直接在根组件外面执行对应逻辑，但如果逻辑必须在组件内完整，则可以在根组件外存储一个是否初始化标记，并且在执行初始化时判断一下此标记，以避免严格模式下渲染2次的问题
+- 如果一个副作用里面涉及到使用某个状态，但是又不涉及修改这个状态，则可以使用`useRef`来手动同步这个状态，并把ref加入依赖，由于ref本身是不会变的因此不会导致副作用被打断后重开，另外官方有一个实验性的API，`useEffectEvent`来解决这个问题，它的底层就是用`useRef`
+
+
+
+#### `useMemo`基于依赖的缓存计算结果
+
+如果组件内有大量数据或者复杂计算，但是这个计算结果并非每次都需要执行，因为它只依赖组件的部分状态变化，则可以使用`useMemo`来缓存计算结果，例子如下：
+
+```jsx
+const [newTodo, setNewTodo] = useState('');
+const visibleTodos = useMemo(() => {
+  // Does not re-run unless todos or filter change
+  return getFilteredTodos(todos, filter);
+}, [todos, filter]);
+```
+
+上述代码的写法和`useEffect`很像，但是它是同步执行的，而且只当依赖发生变动后才会重新计算，如果依赖没有变化，则跳过计算，直接返回上次的计算结果。**`useMemo`内部的函数必须是纯函数，不能产生副作用的那种**。
+
+从HOOKS特性分析，它是一个既保存代码逻辑，又保存代码执行结果，同时通过依赖控制重新计算，进而影响重新渲染时机的HOOK。
+
+
+
+#### 副作用函数的执行时机和组件生命周期的关系
+
+任何REACT组件的生命周期都是一样的：
+
+- 首次渲染后挂载DOM
+- 重新渲染后修改DOM
+- 销毁时也从DOM卸下
+
+**`useEffect`副作用函数的执行时机严格来说和组件的渲染是不同步的**，即使组件销毁了，只要不执行清理函数，它还是可以执行的（比如它是一个定时器或者轮询）**。由于`useEffect`的触发和清理的执行时机是基于依赖数组的变动，所以可能的情况是这样：
+
+- 没有依赖数组，每次组件重新渲染后都会执行
+- 有依赖数组，组件重新渲染后，依赖可能会变也可能不会变，因此组件重新渲染后，副作用函数可能不会重新执行
+- 只有空的依赖数组，只会在首次渲染后执行一次
+
+注意依赖数组，它其实可以依赖组件内的临时变量，如果**临时变量是基于随机数产生，或者基于外部prop的计算属性，那么临时变量也是具有可变性的，因此也会影响副作用函数的执行和清理**。
+
+所以完整的REACT和副作用函数的执行顺序是这样的：
+
+- 首次渲染后挂载DOM，然后执行副作用函数
+- 重新渲染后修改DOM，然后**判断副作用函数的依赖有没有变化，如果变化了，执行上一个清理函数，然后执行下一个副作用函数**
+- 组件销毁时，从DOM卸下，然后执行副作用函数的上一个清理函数
+
+注意**副作用函数的重新触发时机一定是在组件渲染之后**，所以理论上我们可以让它依赖一个全局变量，然后在组件内修改这个全局变量，但是**由于修改全局变量不会触发组件的重新渲染，因此也不会给副作用函数的另一次触发的机会**。
+
+
+
+#### 自定义HOOKS
+
+
+
+
+
+#### 其他常用HOOKS
+
+
+
+
+
 
 
 逃生舱本质上就是类似REACT的后门，就是一些增加开发者权限的接口，主要是针对副作用的， 所以还是HOOKS的特性：
@@ -1817,164 +1932,6 @@ JSX和关注点分离的讨论，有没有可能，**分离视图和业务逻辑
 另外，JSX语法的本质就是用HTML范式的标记语言去表示视图，而实际上这个视图可以基于硬件平台做变换，比如安卓组件或者IOS组件等等，我们要记住的就是HTML范式本身，然后对应平台的具体标签就可以了。
 
 比如REACT NATIVE，REACT CANVAS等都是这个理念的产物。
-
-
-
-##### 组件和纯函数
-
-R的组件是构造器，意味着状态是所有组件共享的，**因此不应该在组件内引入非PROPS的状态并在组件内使用**，这会导致组件的作用域链指向外部变量，并且引发副作用，除非你确定且需要所有组件共享这个外部变量，你知道自己在干什么。
-
-比如这种：
-
-```tsx
-let privateCounter = 0;
-function TestCpn() {
-  privateCounter++;
-
-  return (
-    <>
-      <h6>我的私有计数器{privateCounter}</h6>
-    </>
-  );
-}
-
-export default TestCpn;
-```
-
-这种组件在构造的时候依赖了非PROPS外部私有变量，当组件被复用的时候，实际上这个私有变量是被所有组件共享的，因为ESM模块化是直接引用的，所以是闭包，函数被引用了，它内部的作用域链也就包括此私有变量，所以这个私有变量的值被缓存了，并随着每个组件的初始化而变动。而且当setState被调用的时候这些组件即使不需要重绘也还是会被调用构造函数，因此这个值会不停变动，引发越来越多的副作用。
-
-所以在R里面倾向于写纯函数组件，即所有变量只从形参和内部声明中实现，重复执行会具有稳定的结果：
-
-```tsx
-function TestCpn() {
-  let privateCounter = 0; // 这样就稳定了，每次调用构造函数都会重新初始化
-  privateCounter++;
-
-  return (
-    <>
-      <h6>我的私有计数器{privateCounter}</h6>
-    </>
-  );
-}
-
-export default TestCpn;
-```
-
-##### 组件生命周期，交互逻辑
-
-R的组件也是自洽的，因为它本质是构造器，使用标签引入就相当于解析出一次NEW对象的操作。
-
-**R的生命周期回调函数都以use开头，即useXXX写法**。
-
-组件也支持props，非常简单，就是构造器传参，思路是这样的：
-
-- 整体风格建议使用函数式编程（有待商榷）
-- getter和setter由父组件提供
-- 子组件通过构造器来获取getter和setter，这后面细说
-- 子组件通过getter就可以渲染了，调用setter可以触发变动，但是由于这个getter是从父组件来的，因此它的变动会影响到其他组件
-
-一个简单的例子：
-
-```tsx
-// 子组件
-interface MyCpnProps {
-  count: number;
-  handler: (count: number) => void;
-  interval: number;
-}
-
-function MyCpn({count, handler, interval}: MyCpnProps) {
-  if (interval !== -1) {
-    setTimeout(() => {
-      handler(count + 1);
-    }, interval);
-  }
-  
-  return (
-    <h1>Hello React {count}</h1>
-  );
-}
-
-export default MyCpn;
-
-// 父组件
-function App() {
-  const [count, setCount] = useState(0);
-
-  const handler = (val: number) => {
-    setCount(val);
-  };
-
-  return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <MyCpn count={count} interval={1000} handler={handler} />
-        <MyCpn count={count} interval={-1} handler={handler} />
-      </header>
-    </div>
-  );
-}
-
-export default App;
-```
-
-当然还有更简单的版本，就是不让子组件修改，只传入：
-
-```tsx
-function App() {
-  const [count, setCount] = useState(0);
-  
-  setTimeout(() => {
-    setCount(count + 1);
-  }, 1000);
-
-  return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <MyCpn count={count} />
-        <MyCpn count={count} />
-      </header>
-    </div>
-  );
-}
-```
-
-简单谈一下R和VUE的PROPS设计区别：
-
-- 两者都是通过标签属性的方式从父传入具体值
-- VUE通过选项式API或者defineProps来声明
-- R通过构造器传参来声明
-- 两者都不希望子组件可以修改，但是都确保了一定程度的放权
-- VUE的放权更少，因为VUE不存在setter，所有行为都隐藏在PROXY背后，而从设计上就杜绝了子组件直接修改PROPS的可能性，所以基本上HANDLER是父组件处理的，如果子组件有这方面需求，一般都是冒泡事件，让父组件处理，所以VUE是一个中央集权的系统，有点像SVN。
-- **R从设计上就倾向于放权**，可以直接把setter给子组件，子组件可以自己基于这个setter再封装，useState返回的第二个值就是setter，所以R的意思就是setter全部由父组件分发，子组件可以自行获取并调用，类似分布式的系统。
-
-##### 前端路由
-
-有React Router。
-
-##### 状态管理
-
-R本身就把组件的数据分为状态和PROPS，前者是自己维护的，后者是外部传入的。
-
-##### 其他常见问题和支持
-
-格式化校验，用TS和ESLINT，和VUE一样。
-
-国际化，有对应的il8n库，也可以自己简单实现。
-
-安卓和IOS开发，用REACT NATIVE，语法和REACT类似，等于方便前端的直接迁移做安卓开发，在安卓里面可能原生的KOTLIN和FLUTTER也有使用场景，都是科技巨头的阵地之争，脸书 VS 谷歌。
-
-##### 封装UI组件
-
-这个和VUE的生态圈一样，R也有自己的UI组件生态圈：
-
-- MATERIAL-UI
-- MANTINE
-- CHAKRA-UI
-
-- ANT DESIGN
 
 
 
