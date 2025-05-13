@@ -1808,24 +1808,6 @@ function MyButton({ text, clickHandler, extraClass }) {
 
 
 
-#### `useMemo`基于依赖的缓存计算结果
-
-如果组件内有大量数据或者复杂计算，但是这个计算结果并非每次都需要执行，因为它只依赖组件的部分状态变化，则可以使用`useMemo`来缓存计算结果，例子如下：
-
-```jsx
-const [newTodo, setNewTodo] = useState('');
-const visibleTodos = useMemo(() => {
-  // Does not re-run unless todos or filter change
-  return getFilteredTodos(todos, filter);
-}, [todos, filter]);
-```
-
-上述代码的写法和`useEffect`很像，但是它是同步执行的，而且只当依赖发生变动后才会重新计算，如果依赖没有变化，则跳过计算，直接返回上次的计算结果。**`useMemo`内部的函数必须是纯函数，不能产生副作用的那种**。
-
-从HOOKS特性分析，它是一个既保存代码逻辑，又保存代码执行结果，同时通过依赖控制重新计算，进而影响重新渲染时机的HOOK。
-
-
-
 #### 副作用函数的执行时机和组件生命周期的关系
 
 任何REACT组件的生命周期都是一样的：
@@ -1854,84 +1836,170 @@ const visibleTodos = useMemo(() => {
 
 #### 自定义HOOKS
 
+自定义HOOKS的本质是希望HOOKS可以复用。
 
+本身HOOK就是组件内部的状态，只能在组件内部声明，但是如果有多个组件需要同一套HOOK（注意，不是状态，而是HOOK，要管理副作用的），那么可以考虑把多个副作用整合到一个自定义的副作用函数内，然后使用这个函数作为一个新的副作用函数，举例：
+
+```jsx
+'use client';
+
+import { useEffect } from "react";
+
+// 需要在组件挂载时记录一下
+function useMountLog(cpnName) {
+  useEffect(() => {
+    console.log(`${cpnName} mounted`);
+  }, []);
+}
+
+// 注册window的resize事件
+function useWindowEvent(cpnName) {
+  useEffect(() => {
+    window.addEventListener('resize', () => {
+      console.log('window resized', cpnName);
+    });
+    return () => {
+      console.log('remove resize event', cpnName);
+      window.removeEventListener('resize');
+    };
+  }, []);
+}
+
+export default function CustomHookDemo() {
+  return (
+    <>
+      <ChildCpn key="1" cpnName="ChildCpn1" />
+      <ChildCpn key="2" cpnName="ChildCpn2" />
+    </>
+  );
+}
+
+function ChildCpn({ cpnName }) {
+  useMountLog(cpnName);
+  useWindowEvent(cpnName);
+  return (
+    <h4>child cpn</h4>
+  );
+}
+```
+
+上述代码给子组件使用了2个自定义HOOKS（实际上可以写到一起），然后在父组件内声明了2个这样的子组件，效果是，每个子组件分别都执行了对应的副作用代码，**即各自输出了挂载信息，并各自绑定了window事件**。
+
+这里可以给出自定义HOOK的语法规范：
+
+- 函数名称使用`useFoo`，这是REACT的建议，表示它是一个HOOK，**use后面第一个字母必须大写，之后采用驼峰写法**
+- 可以接收入参或者没有入参
+- **内部必须引入其他的HOOK来管理副作用，HOOK的调用顺序和条件，和直接在组件内使用一样，必须是无条件的放在函数内部开头**，由于自定义HOOK可以使用其他自定义HOOK，因此**本质上所有的HOOK都需要在函数内部开头无条件使用**
+- 可以有返回值或者没有返回值，可以返回一个或者多个值（以数组或者对象的形式）
+
+注意到上述代码，2个组件都在window全局对象上添加了事件，说明**自定义HOOKS内的状态和副作用都是单独的，而非全局的**，比如自定义HOOKS内使用了`useState`，则不同的组件使用这个HOOK会获取到不同的状态，即使它们的初始值是一样的。
+
+如果我们需要只有一个组件添加全局事件成功，则可以这样处理：
+
+- 把自定义HOOKS写到一个单独的文件内，并在函数外侧声明一个悲观锁用来控制，只有第一个执行函数的组件可以注册成功，之后加锁，后续组件就无法注册
+- 另一个方案，把是否执行的逻辑交给开发者，比如在自定义HOOKS里面加一个入参，是否绑定全局事件，开发者可以声明多个组件，并且只在一个组件内传入true，其他组件由开发者控制传入false，这个方案需要开发者内部协调一致
+
+通常来说，像涉及`online`，`offline`之类的事件，可以交给各个组件独立去注册，因为各个组件在实现的时候可以有不同的处理和展示，但是需要各个组件在清理时只清理它自身注册的handler，而不是全部清除。
+
+自定义HOOKS必须和一般的组件一样，尽量避免给整个系统造成副作用，如果产生了副作用，及时做好清理。
+
+只有当副作用业务足够频繁，而且在多个组件内都会用到时，才建议考虑使用自定义HOOK，只执行一次的，简单的，不需要跨组件使用的，不需要抽象为自定义HOOK。
+
+另一个自定义HOOK的例子：
+
+```js
+import { useState, useEffect } from 'react';
+
+export default function useCounter() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => {
+      setCount(c => c + 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+  return count;
+}
+```
 
 
 
 #### 其他常用HOOKS
 
+`useCallback`，允许开发者缓存一个函数，并指明一个依赖，当依赖没有变化时，函数不会被重新创造，而是返回之前的：
 
-
-
-
-
-
-逃生舱本质上就是类似REACT的后门，就是一些增加开发者权限的接口，主要是针对副作用的， 所以还是HOOKS的特性：
-
-- 函数或者状态的独立保存
-- 控制组件渲染时机
-
-
-
-#### JSX语法设计思想（这部分放到最后来，等全部特性都介绍完成后再提）
-
-HTML，CSS和JS，前端三剑客，之前基于关注点分离原则，是分别处理的，写在不同的文件内。但是随着JS功能越来越强大，网页的交互越来越多，JS的主导地位也越来越大。所以基于JS的主导地位，R提出了JSX语法，就是**说在JSX中，HTML沦为了JS的渲染语法糖之类的东西**，目的是确保JS的主导地位，而且确保当JS逻辑变动时，HTML也会被牵连到（R认为JS和HTML就应该保持耦合，因为JS对HTML的操作过于频繁，耦合才是对的，这里再思考一下）。
-
-**R的设计核心理念是可预测**。一个组件就是一个构造函数，不需要考虑VUE的响应式副作用问题，不需要区分一个变量应该是响应式的还是非响应式的还是计算属性的，组件的所有逻辑都是线性的，这样分析一下：
-
-```tsx
-// react组件思路
-import type { Dispatch } from "react";
-
-interface MyCpnProps {
-  count: number;
-  setCount: Dispatch<number>;
-}
-
-function MyCpn({count, setCount}: MyCpnProps) {
-
-  const countStr = `prefix-${count}-suffix`;
-
-  return (
-    <>
-      <h1>Hello React {countStr}</h1>
-      <button onClick={() => setCount(++count)}>点我更新</button>
-    </>
-  );
-}
-
-export default MyCpn;
+```javascript
+const cachedFn = useCallback((args) => {
+  // function body
+}, [dependency]);
 ```
 
-计算属性用普通变量声明就可以，然后调用setter，不再需要考虑变量本身是否要用计算属性表示。
+建议的使用场景：
 
-而VUE在编写过程中需要考虑响应式的问题：
+1. 性能优化，因为默认的组件内函数是每次渲染时重新创建的，如果可以缓存，会提升组件的渲染性能，考虑这样一个场景，如果有一个组件内部包含了5个函数，而这个组件是一个列表的子组件，而这个列表可能有100个这样的子组件，**如果缓存了每个列表元素（子组件）的这5个函数，对渲染整个列表会有明显的性能提升**
+2. 组件内逻辑复用的同时，减少`useEffect`的依赖，**增加依赖的层级，以避免所有的依赖直接作用于`useEffect`，**比如下面的代码：
 
-```vue
-<script setup>
-const val = ref(0);
+```js
+function SearchResults() {
+  const [query, setQuery] = useState('default_query');
 
-const valStr = computed(() => `prefix-${val.value}-suffix`);
-
-val.value++;
-</script>
-
-<template>
-	<h6>{{ valStr }}</h6>
-</template>
+  // 创建一个基于query状态拼接不同URL的函数
+  const getFetchUrl = useCallback(() => {
+    return 'https://hn.algolia.com/api/v1/search?query=' + query;
+  }, [query]);  // 状态变化后函数也会变化
+ 
+  useEffect(() => {
+    const url = getFetchUrl();
+    // 获取数据并处理
+  }, [getFetchUrl]); // 只有当query变化后这个函数才会变化
+ 
+  // ...
+}
 ```
+
+`useCallback`适用于需要频繁渲染的场景，即**重新渲染的频率非常高，使得任何开销都会影响到帧数时，建议使用**。
+
+`useMemo`，如果组件内有大量数据或者复杂计算，但是这个计算结果并非每次都需要执行，因为它只依赖组件的部分状态变化，则可以使用`useMemo`来缓存计算结果，例子如下：
+
+```jsx
+const [newTodo, setNewTodo] = useState('');
+const visibleTodos = useMemo(() => {
+  // Does not re-run unless todos or filter change
+  return getFilteredTodos(todos, filter);
+}, [todos, filter]);
+```
+
+上述代码的写法和`useEffect`很像，但是它是同步执行的，而且只当依赖发生变动后才会重新计算，如果依赖没有变化，则跳过计算，直接返回上次的计算结果。**`useMemo`内部的函数必须是纯函数，不能产生副作用的那种**。
+
+从HOOKS特性分析，它是一个既保存代码逻辑，又保存代码执行结果，同时通过依赖控制重新计算，进而影响重新渲染时机的HOOK。
+
+以下是`useMemo`和`useEffect`的区别：
+
+| 对比项   | useMemo                  | useCallback                             |
+| -------- | ------------------------ | --------------------------------------- |
+| 使用缓存 | 缓存函数的执行结果       | 缓存函数本身                            |
+| 使用依赖 | 依赖变化后会重新计算结果 | 依赖变化后会返回新函数                  |
+| 可代替性 | 不可用`useCallback`代替  | `useMemo(() => cachedFn, [dependency])` |
+
+使用`useMemo`返回一个函数，就是模拟了`useCallback`，但是反过来不行。
+
+后续慢慢补充……
+
+
+
+#### REACT的设计思想和开发思考
+
+REACT的设计考虑了几个因素：
+
+- 前端行业发展使得JS的重要性大大提高，JS不再是简单的交互脚本，而是负责创建整个页面的重要指挥
+- 既然JS是主导地位，而且交互逻辑和渲染逻辑不可分割，那么就应该**把HTML视为JS的渲染语法糖之类的结构**，以JS为核心，兼容HTML
+- 组件化是系统设计的最佳范式，JSX应该支持
+- 单向的数据流和良好的代码可读性
+
+REACT的核心理念是尽量简单，所以在数据流向的设计上需要单向，从父到子，而不是从子到父的可双向。另外代码要具有高可读性，因此不能搞对象的**mutation**那套。
 
 **在VUE中，声明变量，声明计算属性，然后修改变量，由于变量是响应式的，还要回头去思考计算属性能否执行，最后才是渲染**。思路上不能按照自上而下的顺序阅读代码，要经常考虑副作用，从而使得**一旦忽略这个副作用，当代码规模增长后，预测某处修改是否会引发副作用将变得非常困难**。
 
-**所以R最大的优势是可预测，组件的代码逻辑是线性的**。
+REACT不存在此类问题，HOOKS都是在渲染完成后才执行的，整体的逻辑是组件的状态不可变性，**因此所有涉及计算属性的部分，都是在它声明的时候就已经要进行计算了，因为它是不可变的，只有声明然后赋值这一个环节**。所有的计算完成后返回一个JSX，阅读REACT的代码不需要经常返回到上文去推演。
 
-**基于这个线性逻辑，JS应该主导一切**，所以在JSX中，HTML模板是JS的附属品，甚至你可以把HTML模板理解为静态模板，虽然它实际上是虚拟DOM。**模板是为JS服务的，所以不应该为模板单独创建一套语法，**不管是模仿HANDLEBARS还是FREEMARKER，模板要尽可能简单，贴近原生。
-
-JSX和关注点分离的讨论，有没有可能，**分离视图和业务逻辑，本身就是一种过时的MVC思想了？**
-
-另外，JSX语法的本质就是用HTML范式的标记语言去表示视图，而实际上这个视图可以基于硬件平台做变换，比如安卓组件或者IOS组件等等，我们要记住的就是HTML范式本身，然后对应平台的具体标签就可以了。
-
-比如REACT NATIVE，REACT CANVAS等都是这个理念的产物。
-
-
-
+使用REACT的时候，时刻注意状态变化，**把一个交互看作是一个连续的状态变化，以最小变化间隔进行思考，考虑什么变化了，什么没有变化，变化如何体现在UI上**。
