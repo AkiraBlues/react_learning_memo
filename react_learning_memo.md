@@ -2014,3 +2014,241 @@ REACT不存在此类问题，HOOKS都是在渲染完成后才执行的，整体�
 
 
 
+#### 初始化项目
+
+工作空间内执行以下代码：
+
+```powershell
+npx create-next-app@latest nextjs-dashboard --example "https://github.com/vercel/next-learn/tree/main/dashboard/starter-example"
+```
+
+会安装一个NEXTJS的模板项目，以这个为前提开始学习。
+
+严格模式从NEXTJS的13.5版本之后自动启用。
+
+执行`npm run dev`看效果。
+
+VSCODE安装一个**alias-tool**插件，参考它的配置，可以支持在TSX内引入CSS时，按住CTRL + 鼠标左键点击可以跳转到对应的CSS文件。
+
+TAILWINDCSS兼容性相关配置（以VS CODE为例）：
+
+安装**PostCSS Language Support(csstools)**插件，然后配置：
+
+```
+"files.associations": {
+    ".css": "postcss"
+},
+"css.validate": false
+```
+
+这样配置就默认所有CSS都会被TAILWINDCSS侵入，使用它的规则和语法，比如`@apply`指令。
+
+
+
+#### 几个关键文件
+
+- `/app/layout.tsx`，这个是根组件
+- `/app/ui/global.css`，这个是全局生效的CSS文件，需要在根组件引入
+
+后续待补充……
+
+
+
+#### TAILWINDCSS V3基本配置
+
+注意看这个`global.css`文件，它里面有以下引入：
+
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+```
+
+这个`@tailwind`是一个指令，在V4版本已经移除。
+
+
+
+#### 用TAILWINDCSS实现一个三角形
+
+```html
+<div className="border-l-[15px] border-r-[15px] border-b-[26px] border-l-transparent border-r-transparent border-b-black"></div>
+```
+
+`border-l-[15px]`表示左侧是15px宽，这个宽度可以自己写。
+
+`border-l-transparent`表示左侧边框透明。
+
+上述代码的意思是，构建一个盒子，左侧右侧边框15PX且透明，底部边框26PX且颜色是黑色。
+
+
+
+#### 抽离可复用的样式
+
+CSS本身支持模块化，比如声明一个`foo.module.css`，必须以`.module.css`结尾，然后在REACT组件内使用，这个就是一个模块，但是TAILWINDCSS不建议这样做，因为**它会破坏TAILWINDCSS对DOM样式的感知**，更好的策略是直接写在`global.css`内，然后团队成员做好区分就可以，比如上述的三角形：
+
+```css
+.triangle-normal-black {
+  @apply border-l-[15px] border-r-[15px] border-b-[26px] border-l-transparent border-r-transparent border-b-black;
+}
+```
+
+其实就是声明了一个CSS样式，加上了`@apply`以套用TAILWINDCSS的语法，然后直接在组件内使用：
+
+```html
+<div className="triangle-normal-black"></div>
+```
+
+后续可以复用的样式都可以这样写，团队协作时做好沟通和业务分离就可以。
+
+
+
+####  引入CLSX
+
+CLSX用于处理条件渲染样式的问题，原生的REACT面对这个问题是这样处理的：
+
+```jsx
+<button className={ isActive ? 'bg-blue-500 text-white' : 'bg-gray-100 text-black' }>
+  Click me
+</button>
+```
+
+而CLSX是这样处理的：
+
+```jsx
+import clsx from 'clsx';
+
+<button className={clsx(
+  'px-4 py-2 rounded', 
+  isActive ? 'bg-blue-500 text-white' : 'bg-gray-100 text-black',
+  isDisabled && 'opacity-50 cursor-not-allowed'
+)}>
+  Click me
+</button>
+```
+
+相比原生REACT来说有一些优化，首先它内部支持通过逗号来声明多个样式，如果是原生REACT，要支持一部分公用一部分条件渲染，则必须写为：
+
+```jsx
+className={`common-style ${condition ? 'style-a' : 'style-b'}`}
+```
+
+需要结合字符串模板，JSX的表达式，以及注意引号位置，而CLSX对此进行了简化：
+
+```jsx
+className={clsx('common-style', condition ? 'style-a' : 'style-b', condition && 'style-c')}
+```
+
+相比原生REACT写法，更加接近原生的CSS，同时兼顾了条件渲染，因此结合TAILWINDCSS推荐使用，参考[文档](https://github.com/lukeed/clsx)可以看到，这个工具非常灵活，可以支持多个风格混合使用。
+
+结合上述的抽离可复用的样式，可以这样写：
+
+```tsx
+<div className={clsx("relative w-0 h-0", true && "triangle-normal-black")}></div>
+```
+
+推荐使用CLSX，可以大大简化样式的操作难度。
+
+
+
+#### 添加自定义字体
+
+NEXTJS支持开发者从一些预定义的库里面去下载字体，然后直接打包到最终产品内，这样用户访问页面时可以直接下载最终产品内的字体，而不用去第三方库内下载字体，**本质上用户还是要下载字体的**。
+
+NEXTJS里面，使用字体有2种方式：
+
+- 如果要用的是谷歌字体，NEXTJS有内建的支持，可以在开发和构建时去谷歌字体库里面下载
+- 如果要用其他三方字体，需要自己下载并引入到项目内，然后作为asset打包到最终产品内
+
+这里只考虑使用[谷歌字体](https://fonts.google.com/)的场景，可以自己去浏览选择喜欢的。
+
+选择了字体后，新建一个TS文件，引入字体和配置：
+
+```typescript
+import { LXGW_WenKai_Mono_TC } from 'next/font/google';
+
+export const lxgw_wenkai_tc = LXGW_WenKai_Mono_TC({
+  weight: '300',
+  style: 'normal',
+});
+```
+
+然后在根节点使用这个配置：
+
+```tsx
+import { lxgw_wenkai_tc } from './ui/fonts';
+
+// ......
+<body className={clsx(lxgw_wenkai_tc.className, 'antialiased')} >{children}</body>
+// ......
+```
+
+`antialiased`是一个TAILWINDCSS用于平滑字体的样式，建议加上，之后重新启动项目，编译就会发现效果了。注意去看具体的CSS里面的字体文件路径，可以发现是下载到本地，存放在`.next\static\media`路径内。
+
+注意项目内允许多个字体，使用第二个字体的方法和上述一样，只是需要放在不同层级组件的根路径。
+
+
+
+#### 使用图片组件以优化图片展示
+
+NEXTJS通过一个`<Image>`组件可以实现图片的优化，具体来说：
+
+- 一般的网页，图片加载后才会知道其尺寸，然后浏览器再重新计算布局，最简单的例子就是如果你打开一个老的带多图的网页，基本上当需要展示图片的时候，文字的部分会被图片挤到下面，随着图片加载，文字的部分会被越来越挤到下面，导致用户需要频繁滚动到底部才能看到文字，图片组件可以避免这个问题
+- 尺寸问题，在移动端展示的图片可以降低一些分辨率以节省带宽
+- 图片懒加载，这个应该运用到所有页面上
+- 图片格式优化，比如用WEBP代替传统的JPG / PNG，或者在支持的浏览器上使用AVIF
+
+使用NEXTJS的图片组件，注意图片一般都放在PUBLIC路径内，由于PUBLIC是构建后的根路径，因此可以直接写为`/foo.png`：
+
+```tsx
+import Image from 'next/image';
+
+<Image src="/hero-desktop.png" width={1000} height={760} className="hidden md:block" alt="dashborad screenshots" />
+```
+
+注意NEXTJS组件对所有引入的图片都有必填属性的要求。
+
+
+
+
+
+## TAILWINDCSS查缺补漏
+
+
+
+#### 响应式设计
+
+基于屏幕尺寸设置断点，当超过某个断点时展示B样式，否则展示A样式，可以设置多个断点，以使得一套APP适配多个尺寸的屏幕，特别是最近还有什么折叠屏之类的设备。
+
+`[screen-scale]:[className] `，比如`md:block`，这个表示在屏幕尺寸是`md`**及以上**的断点上，设置样式是`block`，即块元素。
+
+注意断点相当于最低要求，**只要满足了（相等也可以）就可以**，除非声明了多个断点，此时以最难满足的那个为主要特性，断点有：
+
+| 断点 | 尺寸（PX表示） | 尺寸（REM表示） |
+| ---- | -------------- | --------------- |
+| sm   | 640            | 40              |
+| md   | 768            | 48              |
+| lg   | 1024           | 64              |
+| xl   | 1280           | 80              |
+| 2xl  | 1536           | 96              |
+
+**一般的桌面和移动端设备上，1 REM = 16 PX**，可以通过修改HTML节点的`font-size`，用比例来表示。
+
+注意移动设备的CSS是逻辑像素。
+
+另外这套规则本质上是基于断点来控制的，换言之移动设置的横屏和竖屏模式，也会有不同的CSS像素宽度，因此可以不修改REM和PX的比例，直接基于断点设计响应式页面就好。
+
+一般的响应式控制是这样的：
+
+```
+className="hidden md:block"
+```
+
+hidden表示`display: none`即默认隐藏，然后当断点是md时，展示为块元素，如果小于md，则不展示。
+
+比如一个只能在移动端展示的样式一般会这样写：
+
+```
+className="sm:block md:hiden"
+```
+
+即小于md断点等于或高于sm断点时展示为块，等于和超出md时不展示。
