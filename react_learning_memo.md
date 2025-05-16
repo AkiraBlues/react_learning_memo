@@ -2047,10 +2047,15 @@ TAILWINDCSS兼容性相关配置（以VS CODE为例）：
 
 #### 几个关键文件
 
-- `/app/layout.tsx`，这个是根组件
-- `/app/ui/global.css`，这个是全局生效的CSS文件，需要在根组件引入
+NEXTJS的根目录里有几个文件夹的名字是固定的，不可更改，比如：
 
-后续待补充……
+- app，这个是APP ROUTER的根路径，用于存放APP ROUTER模式下的页面
+
+- pages，这个是PAGES ROUTER（简单理解就是传统的SPA）模式的根路径，里面存放的都必须是传统的在客户端执行的REACT页面和组件
+- public，这个是构建后放在网站根目录的文件和文件夹，比如`favicon.ico`就可以放在这里
+- src，它有点特殊，从一般意义上它表示存放源码的文件夹，可以不创建，不使用，**名字通常可以修改，但是如果根节点没有app和pages文件夹，且src里面有时，这个src文件夹的名字就不能改了，它就表示存放项目源码的文件夹**
+
+app里面的pages.tsx和layout.tsx是根节点组件，layout包裹page，看源码可以发现**layout就是一个布局组件，开放一个children注入，而page里面的默认导出组件就会被注入到layout的children内**。
 
 
 
@@ -2209,9 +2214,209 @@ import Image from 'next/image';
 
 
 
+#### 路由设计和组件设计
+
+前端行业自从加入了模块化，工具流后，就在逐步往前端路由的方向走，往客户端独大的方向走，后端纯粹就是API和数据交互，用户交互和路由控制完全放在前端，这个阶段下SPA，WPA非常流行。
+
+但是这种重客户端的演化不是没有代价的：
+
+- 首次渲染时间拉长，因为需要先下载JS代码，然后执行JS代码请求后端数据，最后把后端数据整合到HTML内，如果页面较多，那么JS文件也会偏大，当然前端有一些对应的优化技术，但是解决不了根本问题
+- 性能问题，因为完全依赖客户端的计算，在CPU较弱的设备上运行效果会更差
+- 对SEO不友好，因为爬虫爬到的并不是直接的包含了具体内容的HTML，而是一个JS脚本文件和一个页面骨架（一般就是一个空的根节点加一个id属性），爬虫只有能具备执行脚本，生成HTML的能力后，才能获取真实页面
+
+所以后面前端行业也开始反思，就是能不能保留SPA的优点（丰富的交互性，后端纯粹作为API提供支持），同时增加传统的服务端渲染的优点，这个思考就催生出了NEXTJS的几个设计：
+
+- 服务端组件和客户端组件
+- hydration（注水，水合）技术
+- 基于文件系统的路由
+
+NEXTJS里面的组件，默认是服务端组件，但是也可以写客户端组件。服务端组件不能包含具有交互的内容，只能像传统的服务端模板那样，调用数据接口获取数据，然后嵌入到JSX内。
+
+客户端组件则是传统的REACT组件，可以包含所有的交互功能。
+
+服务端端组件负责渲染数据，然后通过`children`属性注入一个可交互的客户端组件（有时候这个很难区分，比如某些页面既要包含数据但是又非常注重交互，这个很挑战开发者的设计和解耦的能力），NEXTJS希望开发者尽量把内容都放到服务端组件内，所以客户端组件应该尽可能地原子化。
+
+当用户通过浏览器请求NEXTJS部署的网站后，服务端组件会在服务端渲染好为HTML后，直接响应给用户，以减少首次渲染时间，并快速输出内容，客户端组件也会作为JS代码发给用户，在用户的浏览器上完成构建，最后整合（水合，注水，hydration）到现有的HTML内，实现了一个完整具有交互性的HTML。**最后还会加上一个前端路由以优化后续跳转的问题**。
+
+后续的页面跳转（这里指的是用户通过和页面元素进行交互的跳转，一般都是点击按钮或者链接，而不是URL输入一个新链接来强制页面渲染），并不是走SPA的老路，也不是走服务端渲染的老路，而是混合路线，简单来说，NEXTJS只允许以下情形：
+
+1. 根节点是服务端组件 + 子节点客户端组件
+2. 纯服务端组件
+3. 纯客户端组件
+
+如果是情况1（最常见），那么后续请求后，服务端会返回一个RSC（React Server Component，服务端组件）打包JSON，浏览器拿到这个JSON后可以快速渲染出页面结构，此外**这个JSON还包含了需要注入的子客户端组件的位置和对应的构建后的JS代码路径**，REACT解析后，会发起请求去获取这部分子组件的代码，并在客户端的DOM构建后，再注入子组件，所以情况1，本质上还是一个继续注水的操作。
+
+情况2，服务端还是返回RSC的JSON，只是不包含了客户端的代码和位置，因此不需要注水。
+
+情况3，参考传统的SPA的操作，服务端直接返回JS代码，由客户端执行并构建组件。
+
+**NEXTJS禁止由客户端组件作为根节点，包含服务端组件作为子节点的行为，**因为这样会增加系统复杂度，而且NEXTJS服务端不具备执行客户端代码的能力。
+
+**NEXTJS禁止在同一个文件内混合声明服务端组件和客户端组件，一个文件只能全部声明为服务端组件，或者在文件头加上`use client`以支持全部声明为客户端组件**。
+
+NEXTJS的路由也是2套系统，一套叫APP ROUTER，一套叫PAGES ROUTER，前者对应优化后的版本，即服务端渲染+客户端子组件水合的模式，后者对应传统的SPA模式。**虽然理论上2套路由系统可以同时使用（确保不要有路径冲突），但是NEXTJS官方建议不要混合使用，除非你在一个老的SPA项目上希望整合新的APP ROUTER，可以作为一个过渡期的方案**。
+
+PAGES ROUTER这里不做过多介绍，就是在根节点创建一个`pages`文件夹（名称不能修改），然后写组件就可以，页面跳转，状态控制什么的都是老版本的REACT-ROUTER支持。
+
+APP ROUTER直接基于文件系统映射，比如：
+
+- `/home`，就是对应`app/home/page.tsx`
+- `/home/about`，`app/home/about/page.tsx`
+
+简单来说所有路径都是基于文件夹的树结构进行映射，根路径，即`/`，必须对应app每个文件夹内提供一个`page.js`或者`page.tsx`作为当前页面的入口，当然这个文件内也可以引入其他模块。
+
+每个`page.tsx`必须默认导出一个组件，组件名称随意：
+
+```tsx
+export default function MyFooBarBarzPage() {
+  // return jsx here
+}
+```
+
+注意这个组件按照NEXTJS的支持场景，只能是纯客户端组件或者服务端组件包含或不包含客户端组件。
+
+页面控制的跳转，需要引入`next/link`组件，以避免使用A标签带来的页面强制全局刷新，比如可以通过layout.tsx设置一个所有子页面的共同父页面，然后在它上面加LINK，点击后就可以跳转到不同的子页面，具体例子：
+
+```tsx
+import Link from 'next/link';
+
+interface LinkEle {
+  name: string;
+  href: string;
+}
+
+const links: Array<LinkEle> = [
+  { name: 'Home', href: '/dashboard'},
+  { name: 'Invoices', href: '/dashboard/invoice' },
+  { name: 'Customers', href: '/dashboard/customer'},
+];
+
+export default function Layout({ children}: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-screen flex-row md:overflow-hidden px-4 py-4 ">
+      <div className="flex flex-col mr-10 w-64">
+        <h4>side bar</h4>
+        <ul>
+          {
+            links.map(ele => {
+              return (
+                <li className="flex grow">
+                  <Link className="flex items-center justify-center h-[48px]" key={ele.name} href={ele.href}>
+                    <span>{ele.name}</span>
+                  </Link>
+                </li>
+              );
+            })
+          }
+        </ul>
+      </div>
+      <div className="w-full">{children}</div>
+    </div>
+  );
+}
+```
+
+引入LINK组件后，直接使用它，传入href和key，内部注入路由跳转的具体组件，它最后会被渲染为a组件，但是点击后通过观察控制台可以看到，请求的是RSC，而非整个页面。所以说明**LINK组件是一个客户端组件，它启用了事件机制，拦截了默认的行为**。
+
+有了页面跳转还不够，有时候需要在组件内判断当前处于哪个页面，比如最简单的如果构建一个超链接侧栏，那么可以高亮当前所在的页面对应的跳转按钮，使用`usePathname`来实现这个功能，注意它是一个NEXTJS的HOOK，因此使用它的地方必须转为客户端组件，代码用例：
+
+```tsx
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation'; // 引入获取当前的页面路径
+import clsx from 'clsx';
+
+const links = [
+  { name: 'Home', href: '/dashboard'},
+  { name: 'Invoices', href: '/dashboard/invoice'},
+  { name: 'Customers', href: '/dashboard/customer'},
+];
+
+export default function NavLinks() {
+  const pathname = usePathname();
+  return (
+    <>
+      {links.map((link) => {
+        return (
+          <Link
+            key={link.name}
+            href={link.href}
+            className={
+              clsx(
+                'flex h-[48px] grow items-center justify-center gap-2 rounded-md',
+                'bg-gray-50 p-3 text-sm font-medium hover:bg-sky-100 hover:text-blue-600',
+                'md:flex-none md:justify-start md:p-2 md:px-3',
+                pathname === link.href && 'text-red-600 hover:text-red-600',
+              )
+            }
+          >
+            <p className="hidden md:block">{link.name}</p>
+          </Link>
+        );
+      })}
+    </>
+  );
+}
+```
+
+`usePathname`拿到的根路径，如果是在首页则是`/`，之后就是一个以`/foo`开头的路径，不会包含QUERY的部分。
+
+
+
+#### 编写API
+
+还是基于文件系统，在一个文件夹内部创建一个`route.ts`文件，提供HTTP通用的方法：
+
+```typescript
+export async function GET() {}
+export async function POST() {}
+export async function PUT() {}
+export async function DELETE() {}
+export async function PATCH() {}
+```
+
+就可以通过访问对应的路径，构造请求方式和入参，就可以把NEXTJS本身作为一个服务器来使用。
+
+下面给出一个例子：
+
+```tsx
+export async function GET() {
+  return Response.json({
+    message: 'hello world this is a get method',
+  });
+}
+```
+
+假设这个文件的路径是：`/app/api/query/route.ts`，那么访问它的路径就是：`/api/query`。如果访问成功就可以看到响应。
+
+
+
+#### 设置数据库
+
+NEXTJS为开发中小全栈型应用提供了连接数据库的功能，从快速开发迭代的角度看这个行为是可以理解的，但是任何上了规模的应用估计都不会用，只会把NEXTJS作为前端服务器。
+
+要使用数据库的功能，又不想本地搭建数据库，则可以使用VERCEL的服务，整体流程是：
+
+1. 把NEXTJS项目代码上传到GITHUB
+2. 注册一个VERCEL账号，关联此GITHUB代码仓
+3. 在VERCEL上部署此NEXTJS项目
+4. 在此VERCEL关联的GITHUB项目上开启一个存储，选择NEON，它使用的是POSTGRES数据库，创建好后复制一下连接信息，包括地址，用户名，密码等等
+5. 连接数据库，写入初始化数据，之后开始正常的CRUD操作
+
+如果要观察数据库的数据，可以直接在VERCEL管理台查看。
+
 
 
 ## TAILWINDCSS查缺补漏
+
+
+
+#### 默认尺寸单位是1/4 REM
+
+默认的尺寸单位是1/4 ，即0.25 REM，比如`px-4`表示`padding-left: 1rem; padding-right: 1rem`，这个是TAILWINDCSS的特性。
+
+如果要使用真实PX单位，可以这样写：`px-[4px]`。
 
 
 
