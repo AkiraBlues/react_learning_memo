@@ -2364,6 +2364,12 @@ export default function NavLinks() {
 
 
 
+#### 路由分组
+
+一般来说NEXTJS的路由对应文件系统，但有一个特例，就是文件名称带括号的，比如`app/home/(etc)/about`，它实际对应的URL还是`/home/about`，中间的文件夹因为带括号所以不会被列入到URL内。这个其实是路由组，用于管理对应的路由，比如开发者希望按照业务对路由进行文件分组时（用户登录页面，后台管理登录页面等等），但是又不希望这个文件分组体现在URL上时，就可以用`(group_name)`创建一个文件夹进行分组，当然也可以直接在它里面放page.tsx以使得它是一个真实页面，但是不在URL上体现出来。
+
+
+
 #### 编写API
 
 还是基于文件系统，在一个文件夹内部创建一个`route.ts`文件，提供HTTP通用的方法：
@@ -2392,7 +2398,7 @@ export async function GET() {
 
 
 
-#### 设置数据库
+#### 设置数据库并做简单查询
 
 NEXTJS为开发中小全栈型应用提供了连接数据库的功能，从快速开发迭代的角度看这个行为是可以理解的，但是任何上了规模的应用估计都不会用，只会把NEXTJS作为前端服务器。
 
@@ -2405,6 +2411,159 @@ NEXTJS为开发中小全栈型应用提供了连接数据库的功能，从快�
 5. 连接数据库，写入初始化数据，之后开始正常的CRUD操作
 
 如果要观察数据库的数据，可以直接在VERCEL管理台查看。
+
+连接数据库和进行查询的简单例子：
+
+```tsx
+import postgres from 'postgres'; // 这个库已经做了防SQL注入
+
+const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
+
+async function listInvoices() {
+	const data = await sql`
+    SELECT invoices.amount, customers.name
+    FROM invoices
+    JOIN customers ON invoices.customer_id = customers.id
+    WHERE invoices.amount = 666;
+  `;
+	return data;
+}
+
+export async function GET() {
+  try {
+    return Response.json(await listInvoices());
+  } catch (error) {
+    return Response.json({ error }, { status: 500 });
+  }
+}
+```
+
+注意上述代码获取的`sql`实际上是一个函数，后续的调用方法是JS语法内的TAGGED TEMPLATE LIERALS写法，是合法的，这里的`sql`变量相当于一个连接对象，**NEXTJS在这方面也参考了后端语言的设计，也有连接池的库，如果需要考虑性能优化是可以用的**。
+
+
+
+#### 服务端组件的数据查询和渲染
+
+NEXTJS本身是一个服务端的前端，它处理数据获取的方式，和一般的SPA不一样，一般的SPA，只能通过后端提供的API来获取数据，而且如果涉及到安全，要么需要用户进行验证，比如登录以获得授权的SESSION_ID，要么就是需要在请求信息内封装一些验证密钥，但是这种方式就很容易暴露，除非这个API是公用的，可以直接开放并且在后端搭建各种DDOS防御。
+
+而NEXTJS本身作为服务端，就可以代替传统意义上后端的作用了，它查询数据可以这样：
+
+- 还是之前的方案，直接返回API地址给客户端组件，让客户端和API直接对接
+- 作为客户端的中转，要么自身去连接数据库查询，要么自身去链接API，NEXTJS可以创建服务端组件，使用这些组件进行数据查询
+- 安全问题，如果是封闭的API，依然可以采用登录验证，如果是开放的API，NEXTJS自身也可以部署防止DDOS的组件以进行某些拦截，最大的好处是，**不管哪种方式，NEXTJS都不会开放真正连接所需的密码密钥给用户**
+
+NEXTJS使用服务端组件进行查询的例子，注意服务端组件不能使用`useEffect`所以回归到传统的`async / await`机制下：
+
+```tsx
+async function getData() {
+  const res = await fetch('https://api.example.com/data', { cache: 'no-store' });
+  return res.json();
+}
+
+export default async function Page() { // 服务端组件可以用async修饰
+  const data = await getData(); // 内部的代码逻辑更清晰，直接await，相当于先查询，再渲染，而不是客户端组件的先渲染，然后副作用查询，然后修改状态
+  return <pre>{JSON.stringify(data, null, 2)}</pre>;
+}
+```
+
+上述代码是一个简化版，但是在实际业务中其实过程都是类似的，而且考虑到REACT的单向数据流，一般都是这样搞：
+
+```jsx
+export default async function Page() {
+  const [data1, data2, data3] = await promise.all([ // 或者使用Promise.allSettled以允许部分REJECT场景
+    fetchData1(),
+    fetchData2(),
+    fetchData3()
+  ]);
+  return (
+    <>
+      <ChildCpn1 data={data1} />
+      <ChildCpn2 data={data2} />
+      <ChildCpn3 data={data3} />
+    </>
+  );
+}
+```
+
+即父组件负责查询所有的数据，通过Promise.all（或者`Promise.allSettled`以允许部分REJECT的场景，因为`Promise.all`只允许所有的都是成功）进行并行查询，全部返回结果后再直接提供给子组件，子组件自身不负责数据查询。
+
+
+
+#### 静态渲染和动态渲染入门
+
+NEXTJS的**开发模式，即`next dev`命令，默认都是动态渲染**，即所有数据都是实时查询，之后再渲染为组件的。
+
+NEXTJS的构建和部署，默认是静态渲染模式，即所有数据都是在构建时进行查询和生成的，之后通过`next build`构建为服务端的JS代码（内部实际上就是服务端组件的JS代码，可以让服务器以很低的开销生成HTML，因为直接生成HTML的话还要读取到内存再作为文件流输出，以JS代码保存更方便，而且还要考虑客户端的REACT运行时和水合功能），再通过`next start`来访问。
+
+如何观察当前是静态渲染？很简单，修改数据库，然后刷新一下看页面是否变化，如果没有变化，就是静态渲染，反之就是动态渲染，静态渲染一般也是耗时最少的，理论上只有静态网页文件的传输耗时，没有数据查询的耗时。
+
+对于那些需要传参的查询，NEXTJS默认是可以在构建时对入参进行枚举，以穷举所有的可能性，对于每个可能的值，NEXTJS会生成对应的独立页面，以减少干扰。但是注意，**由于NEXTJS具备依赖入参的查询也可以在构建时生成静态数据的能力，它不会基于代码去推断某个查询需要生成静态页面还是动态渲染**。换言之，**开发者必须手动配置当前组件是否需要静态渲染或动态渲染，以及做好对应的配置以防止运行时报错**。
+
+
+
+#### 串流技术
+
+串流技术一般用于动态渲染的场景，目的是解决一个页面需要查询多个数据并返回多个组件的耗时问题，通常来说我们使用`Promise.all`来并行查询，但是**最终页面的返回取决于耗时最长的那个查询**，在某些场景下这是不友好的。
+
+比如一个设置页面，大部分设置信息都是本地存储或者依赖非常高效的本地数据库，但是涉及网络和会员等的设置，或者运营方的设置，需要请求额外的API，以及更长的耗时，此时，我们可以优先把已经完成的信息返回给用户，耗时更长的信息可以在获取后再串流返回，这个就是串流技术的作用。
+
+简单来说串流技术是这样使用的：
+
+- 基于HTTP1.1及以后的一个协议，叫`Transfer-Encoding: chunked`，这个协议**支持分块传输响应**，一般用于文件下载，但是从REACT18版本开始，NEXTJS也支持了，目的就是用于串流服务端组件，即服务器可以先传输一部分信息（比如预渲染的加载动画或者本地静态渲染的数据），之后再传输另一部分信息（耗时更长的动态渲染数据），在此期间客户端和服务器的连接会一直保持
+- NEXTJS服务端先返回一些耗时短的HTML，对于耗时长的组件，先返回一个占位符的HTML，这样客户端可以快速展示
+- 之后NEXTJS继续完成耗时长的查询，并返回后续的服务端组件
+- 允许在客户端的REACT，接收到这部分信息后，执行简单的替换代码（或许会用到水合，如果服务端返回的是客户端组件），把对应的占位符HTML替换为真实的服务端组件
+- **数据查询的逻辑需要迁移到子组件内，因为只有子组件本身负责初始化才能避免同时请求多个数据时耗时最长的那个拖慢整体响应的问题，**否则还是在父组件层级进行等待，其他细节后面会提到
+- SEO友好问题，墙内的百度就免谈了，全球来说，这种串流技术对谷歌的爬虫是友好的，因为**谷歌的爬虫可以执行JS，而且只要后续在一个合理耗时内返回动态渲染的组件，那么谷歌的爬虫是愿意等待的，也会在等待后执行JS以拿到真实的页面**，当然如果某个组件耗时太长，不要说SEO了，用户都会提意见
+
+具体的代码编写思路是这样的：
+
+- 在页面层面，可以声明一个`loading.tsx`，用于直接返回结果，NEXTJS的约定配置是，基于文件系统的页面中，如果包含`loadint.tsx`，则优先返回它，之后当耗时的真实渲染完成后，再返回`page.tsx`
+- 在组件层面，可以通过`Suspense`组件来实现相同的效果，先直接返回占位的组件，再返回渲染好的真实组件
+
+比如页面层面，这个是NEXTJS自带的功能，基于约定大于配置的原则，声明好了就可以，比如：
+
+```tsx
+import DashboardSkeleton from '@/app/ui/skeletons';
+
+export default function Loading() {
+  return <DashboardSkeleton />;
+}
+```
+
+默认的规则是，如果`page.tsx`是需要异步的，则先展示loading再展示page，反之如果`page.tsx`是同步的，直接展示page。此外，NEXTJS规定**这个`loading.tsx`必须只能执行同步代码，只能是同步的立刻渲染**。
+
+要验证也很简单，在page里面加一段延迟渲染的wait代码即可，可以发现优先展示了骨架图，之后再展示page。打开调试工具也可以看到首个page请求的瀑布流耗时持续到了最后，请求头里面有`Transfer-Encoding:chunked`。
+
+组件的单个串流，父组件的部分这样写：
+
+```jsx
+import { Suspense } from 'react'; 
+import { RevenueChartSkeleton } from '@/app/ui/skeletons';
+import RevenueChart from '@/app/ui/dashboard/revenue-chart';
+
+export default function MyPage() {
+  return (
+    <Suspense fallback={<RevenueChartSkeleton />}>
+      <RevenueChart />
+    </Suspense>
+  );
+}
+```
+
+至于子组件，内部要写请求数据的逻辑，因此要用`async / await`语法。
+
+总结：
+
+- 父组件用Suspense包裹子组件，并提供子组件渲染完成之前的效果
+- **父组件内不要写数据请求逻辑，转移到子组件内完成，确保子组件需要耗时来渲染**
+- 子组件渲染完成并返回后，服务端会把这部分响应给客户端，之后客户端的REACT会负责把这部分替换掉之前的渲染部分
+
+
+
+#### 局部渲染
+
+
 
 
 
