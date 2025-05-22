@@ -2364,6 +2364,30 @@ export default function NavLinks() {
 
 
 
+#### 客户端路由跳转方案
+
+- 使用link组件，预先写好HREF，用户点击后就可以跳转
+- 使用`useRouter`，进行手动控制的跳转
+- 如果客户端组件是表单，提交表单后，客户端会预期收到响应码303，即下一个跳转地址，服务端可以通过`redirect`命令控制跳转地址，客户端收到地址后就会跳转
+
+
+
+#### 动态文件路由
+
+假设我们的路由具有传参功能，但是不是基于QUERY传参而是希望参数写在URL的PATH里面，可以使用`[param_name]`的方式创建文件夹，比如`[id]`，就表示PATH的某个部分是ID入参。
+
+页面组件获取此属性使用props.params.id获取，因此声明的时候是这样的：
+
+```tsx
+export default async function Page(props: { params: Promise<{ id: string }> }) {
+  //
+}
+```
+
+
+
+
+
 #### `usePathname`参考
 
 | URL                                     | `usePathname()`的返回值 |
@@ -2526,7 +2550,7 @@ NEXJS的默认构建策略是静态渲染，这表示如果我们不做任何事
 
 另外NEXTJS还会采用prefetch技术，针对页面上的链接跳转到的页面预先下载，这样当用户访问后续页面时就不需要后续下载JS了。
 
-
+这里后续一定要补充`revalidatePath`以及相关的知识点。
 
 
 
@@ -2685,7 +2709,127 @@ export default async function Page(props: {
 
 
 
-#### 修改数据
+#### 数据操作（CRUD里面的C和U和D）和SERVER ACTION
+
+传统的SPA里面是这样操作数据的：
+
+- 使用状态模型或者其他方式获取表单的数据
+- 阻止表单的默认行为，把表单数据通过请求工具，直接提交到后端API上
+- 基于后端的响应，进行对应的UI处理
+
+而NEXJS是一个全栈式的框架，因此它不能把接收到数据后的行为外包给后端去做，必须它自己做，所以使用了叫做SERVER ACTION的技术，设计如下：
+
+- 声明一个表单组件，可以是服务端的，也可以是客户端的，考虑到后续的表单校验和异常处理，用客户端组件更好
+- 服务端生成表单对应的SERVER ACTION函数
+- 把表单组件的ACTION属性绑定到这个ACTION函数上
+- 客户端执行表单提交时，请求就会被这个ACTION函数拦截，并执行对应业务逻辑
+- 一般的页面跳转可以由服务端控制，表单校验，异常处理，可以在客户端完成，但需要服务端配合返回对应错误信息而非直接抛出一个异常
+
+原理如下：
+
+- 不管表单组件是服务端还是客户端，最后它的action属性不会带有一个URL，顶多是一个兼容性的JS代码
+- 提交的时候客户端的REACT会拦截表单的默认行为并把表单数据发送给服务端
+- 表单数据里带了一个隐藏的name是`FOOXXXX_ACTION_ID_BARXXXX`的字段，没有值
+- 服务端根据这个值来定位具体的ACTION函数，执行并给出响应
+- 如果服务端的响应不包含REDIRECT的部分，则客户端只会局部刷新当前页面，如果包含了REDIRECT的部分，就会返回303响应码，这样客户端可以执行类似LINK跳转，如果返回了FORM STATE，且表单是客户端组件，则可以进行各种UI操作，比如给出服务端的表单校验结果等等
+
+原理是表单在HTML内，就是一个空的`action`，类型是POST，然后表单里面加了一个隐藏字段，名称就是对应服务端的这个ACTION，在提交数据的时候服务端可以解析出这个隐藏字段（它的name属性就是它的值），基于字段找到对应的ACTION并处理。
+
+好处是，假设当前的表单是客户端的，它需要下载和执行额外JS以保证前端的表单校验，但是**即使这部分JS由于网络原因没有下载完成，表单还是可以直接提交给后端的**（因为对应的ACTION_ID已经放在提交数据内了，只要确保后端做了校验即可），在一些弱网场景下表现会更好。
+
+ACTION函数的默认处理就是执行CUD操作，之后的处理有几种：
+
+- 默认不处理，就是只操作CUD，之后不管，此时客户端会重新局部刷新当前页面，如果页面初始化时有数据查询，那么应该会体现出修改后的结果
+- 通过`redirect`进行处理，这个逻辑的核心是，服务端的响应是包含一个303状态码的，这样客户端就知道要跳转到的下一个页面是什么了
+- 直接抛出异常（不推荐），此时会进入到最近的ERROR.TSX页面，这个过程是客户端REACT的路由控制的，它知道怎么处理错误的响应，当然也可以交给客户端组件处理，由此引出了一个问题， SERVER ACTION只能是服务端编写，但是表单组件可以是客户端组件，而且也可以用到SERVER ACTION的功能。
+- 如果需要服务端校验表单并处理异常，则服务端不能直接抛出异常，而是应该给出一个表单提交结果对象，也叫FormState，服务端必须要在SERVER ACTION内返回这个FORM STATE，这样客户端表单组件才可以用这个来处理
+- 另外即使是客户端表单组件，也可以接收服务端的redirect响应并做跳转，即它的表现和服务端渲染出来的表单控件是一样的
+
+所以得出表单操作的最佳实践，以及NEXTJS的开发最佳实践：
+
+- 按照业务划分，每个开发应该都要负责全栈，即前后端，不同的开发应该负责不同的业务
+- 表单操作是SERVER ACTION配合客户端表单组件，因为总是需要前端校验的，而全栈开发也需要负责后端校验，有些校验代码甚至可以复用
+- 开发在写前端校验和表单控件时，主要负责UI交互的功能，不涉及页面跳转，开发在写后端表单校验时，应该通过REDIRECT控制页面跳转，这样一来既保证了表单的灵活性，又保证了路由的安全性
+
+代码用例简化版：
+
+```tsx
+// 声明一个action函数，必须是async的
+export async function createItemAction(formData: FormData) {
+  const name = formData.get('name');
+  const age = formData.get('age');
+  updateUser(name, age);
+}
+
+// 表单组件内部的form，关联一下action属性，默认的提交类型也会改为POST
+export function MyForm() {
+  return (
+    <form action={createItemAction}>
+      {/* 具体的表单JSX */}
+    </form>
+  )
+}
+```
+
+SERVER ACTION必须是ASYNC，因为**NEXTJS需要把这个响应任务加入到异步队列里面**，如果它是同步执行的，即使在业务上可行，也会因为NEXTJS无法把它加入异步队列，**导致NEXTJS没办法给出后续的响应**。
+
+表单编辑过程中的ID问题，假设现在要编辑一个表单，首先可以写一个SQL把对应的记录基于ID查询出来，ID可以是UUID也可以是自然数，但是如何保证我们提交表单的时候，用户不能篡改ID呢？即使我们把ID作为隐藏元素，用户通过开发模式还是可以找到这个表单的（和ACTION_ID一样都可以在控制台看到），所以NEXTJS提供了一个方案，就是表单本身不包含ID信息，提交之前用REACT运行时进行拦截，并让REACT管理这部分信息，把ID添加上，写法如下：
+
+```jsx
+'use server';
+export function myUpdateAction(id, formData) {
+    
+}
+
+export function MyForm({data}) {
+  const id = data.id;
+  const myUpdateActionWithId = myUpdateAction.bind(null, id); // 这里把server action的2个入参通过bind传参改为只需要1个入参的server action
+  return (
+    <form action={myUpdateActionWithId}>
+    </form>
+  )
+}
+```
+
+表单的`action`属性只能接收经过`use server`标记的SERVER ACTION，换言之直接声明一个匿名函数并传入到表单内是不被允许的，NEXTJS需要在编译期就获取到对应的SERVER ACTION。**BIND虽然也是动态创建函数，但是它保留了对原SERVER ACTION的引用，因此NEXTJS可以基于这个动态创建的函数追踪到原本的SERVER ACTION函数**。
+
+删除也是一样，由于FORM ACTION的唯一入参是FORM_DATA，而删除只需要传入ID，因此也需要BIND转换一下。
+
+
+
+#### 补充--SERVER ACTION的规定和限制
+
+为什么要通过`use server`注释来使得函数变为SERVER ACTION？因为NEXTJS需要给对应的函数进行标记，所以它必须是：
+
+- 一个非动态生成的函数，需要在解析阶段就能知道它的存在，而非在运行时才能知道它的存在
+- 带名字的函数，需要通过名字辅助定位
+- 它所在的模块是用`use server`修饰的
+
+所以这就解释了为什么匿名函数不能做SERVER ACTION，因为它没有名字，而且最重要的，它是在运行时期创建的，因此NEXTJS无法在编译期感知到它，它也不是来源于一个`use server`修饰的模块。
+
+那么用`bind`修饰一个SERVER ACTION为什么不会破坏它呢？因为BIND实际上是创造一个对原函数的引用，虽然新的函数也是在运行时期创建的，**但它引用的那个函数是SERVER ACTION，所以NEXTJS是可以追踪的**。
+
+**当通过一个ACTION={SERVER_ACTION}进行绑定时，NEXTJS只会传入一个唯一的入参，就是FORM_DATA**，换言之如果我们声明的SERVER ACTION的首个入参不是FORM_DATA，而是ID或者其他入参，那么本质上都要通过BIND来确保它的首个入参是FORM_DATA或者它所需的入参都已经满足，即使不依赖FORM_DATA也没有关系。
+
+
+
+####  开发过程常见错误
+
+
+
+##### module-not-found
+
+如果一些很常见的模块，比如fs，net等都无法找到，大概率是在一个服务端组件使用了`use client`写法，比如：
+
+```js
+'use client';
+
+import fs from 'fs';
+```
+
+因为客户端组件目前还不支持完整的NODEJS服务端运行环境，因此无法这样写。
+
+所以也给出一个习惯，没事别TM瞎写`use client`，默认都用服务端组件先开发，实在无法满足需求了再切到客户端组件。
 
 
 
