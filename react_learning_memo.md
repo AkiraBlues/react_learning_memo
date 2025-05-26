@@ -764,7 +764,7 @@ export default function Button() {
 
  使用HOOKS的几个原则：
 
-- 声明在组件内部开头，顺序很重要，因为是REACT在帮助组件管理它的内部状态，而REACT在管理时只是给每个组件定义了一个数组用于保存各个状态
+- 声明在组件内部开头，顺序很重要，因为是REACT在帮助组件管理它的内部状态，而REACT在管理时只是给每个组件定义了一个数组用于保存各个状态，**如果HOOKS需要依赖本地变量，则可以在HOOKS之前声明这些变量，但是也必须是无条件的**
 - 禁止使用条件语句进行声明，所有的HOOKS必须是无条件声明
 - 所有HOOKS均以`use`开头，由于REACT支持自定义HOOKS，因此声明这些HOOKS时也应该遵循此命名规范
 
@@ -2810,6 +2810,196 @@ export function MyForm({data}) {
 那么用`bind`修饰一个SERVER ACTION为什么不会破坏它呢？因为BIND实际上是创造一个对原函数的引用，虽然新的函数也是在运行时期创建的，**但它引用的那个函数是SERVER ACTION，所以NEXTJS是可以追踪的**。
 
 **当通过一个ACTION={SERVER_ACTION}进行绑定时，NEXTJS只会传入一个唯一的入参，就是FORM_DATA**，换言之如果我们声明的SERVER ACTION的首个入参不是FORM_DATA，而是ID或者其他入参，那么本质上都要通过BIND来确保它的首个入参是FORM_DATA或者它所需的入参都已经满足，即使不依赖FORM_DATA也没有关系。
+
+
+
+#### 异常处理
+
+涉及到服务端的操作，如果有可能产生运行时异常的，一般来说用TRY--CATCH处理更好。
+
+还有一种处理是直接声明一个`error.tsx`文件，注意这个文件是可以存在多个的，它会按照最近的路由的处理，比如当前的路由是`/a/b`，里面有一个page.tsx，那么如果加一个error.tsx，当在这个路由发生错误且没有做好处理时，就会展示当前路由内的error.tsx，如果当前路由没有，会继续向上查找，直到最后返回一个全局的error.tsx。
+
+error.tsx里面的组件必须是客户端组件，当然一般来说如果不想细粒度的处理异常，又希望异常可以被用户感知到，则可以采用这个方案。（一般是新闻博客类网站会采用这种设计）
+
+一个常见的error.tsx写法：
+
+```tsx
+'use client'; // 必须是客户端组件
+ 
+import { useEffect } from 'react';
+ 
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    // Optionally log the error to an error reporting service
+    console.error(error);
+  }, [error]);
+ 
+  return (
+    <main className="flex h-full flex-col items-center justify-center">
+      <h2 className="text-center">Something went wrong!</h2>
+      <button
+        className="mt-4 rounded-md bg-blue-500 px-4 py-2 text-sm text-white transition-colors hover:bg-blue-400"
+        onClick={
+          // Attempt to recover by trying to re-render the invoices route
+          () => reset()
+        }
+      >
+        Try again
+      </button>
+    </main>
+  );
+}
+```
+
+当然，表单的处理一般会用useAction来控制，以便用户可以在不中断的情况下修改提交数据以通过校验。
+
+另外一种处理异常的方式是使用`notFound`，这个和error.tsx一样，使用思路是：
+
+- 类似error.tsx的需要先产生异常或者手动throw异常，notFound也需要先手动调用一次noutFound()
+- 类似error.tsx，也要声明一个notFound.tsx文件
+
+是直接在业务代码中使用的，比如：
+
+```tsx
+import { notFound } from 'next/navigation';
+
+export default async function Page() {
+  if (condition) {
+    return normalJSX;
+  } else {
+    notFound();
+  }
+}
+```
+
+在一个路由内如果同时有noutFound.tsx和error.tsx，则需要开发者去适配，因为notFound必须是手动调用的，假设开发者不触发这个函数，那么只会有error.tsx生效。
+
+
+
+#### 表单校验和`useActionState`
+
+表单的客户端校验，有很多三方库，当然最简单的就是required属性，比如：
+
+```tsx
+<input
+  id="amount"
+  name="amount"
+  type="number"
+  step="0.01"
+  placeholder="Enter USD amount"
+  required
+/>
+```
+
+当然更多的时候需要使用服务端校验，服务端把结果返回给客户端，而不是简单的抛出一个错误并展示error.tsx。为此需要用到`useStateAction`，它的使用思路是这样的：
+
+- 表单必须是客户端组件
+- 表单引入`useStateAction`，关联服务端的SERVER ACTION
+- **服务端修改SERVER ACTION，在其中加上校验的逻辑，如果出现异常，返回一个错误对象**
+- **由于表单是客户端组件，在收到错误对象后就会执行类似重新渲染的逻辑，此时开发需要把错误对象内的必要信息展示出来**
+
+这里以表单校验库`zod`为例，它可以定义服务端的校验规则，并且基于表单数据，生成一个校验结果对象，里面可以包含校验结果，以及校验失败的错误信息：
+
+```tsx
+export type State = {
+  message: string;
+  errors?: {
+    customerId?: string;
+    amount?: string;
+    status?: string;
+  }
+};
+
+const invoiceFormSchema = z.object({
+  id: z.string(),
+  customerId: z.string({
+    invalid_type_error: 'please select a customer'
+  }),
+  amount: z.coerce.number().gt(0, { message: 'please input a number greater than $0' }),
+  status: z.enum(['pending', 'paid'], {
+    invalid_type_error: 'please choose an invoice status'
+  }),
+  date: z.string()
+}).omit({id: true, date: true});
+
+function _parseInvoiceFormData(formData: FormData) {
+  const _validateStatus = invoiceFormSchema.safeParse({
+    customerId: formData.get('customerId'),
+    amount: formData.get('amount'),
+    status: formData.get('status'),
+  });
+  if (_validateStatus.success) {
+    const amount = _validateStatus.data.amount;
+    _validateStatus.data.amount = amount * 100;
+  }
+  return _validateStatus;
+}
+
+export async function createInvoiceAction(prevState: State, formData: FormData): Promise<State> {
+  const validateStatus = _parseInvoiceFormData(formData);
+  if (!validateStatus.success) {
+    return {
+      message: 'field validation failed',
+      errors: validateStatus.error.flatten().fieldErrors
+    } as State;
+  }
+  const _formData = validateStatus.data;
+  const date = new Date().toISOString().split('T')[0];
+  await sql`
+    INSERT INTO invoices (customer_id, amount, status, date)
+    VALUES (${_formData.customerId}, ${_formData.amount}, ${_formData.status}, ${date})
+  `;
+  _updateAndBackInvoiceList(true);
+  return {message: 'ok'};
+}
+```
+
+TS内需要先定义好State类型，它代表表单校验的结果，这里的设计是通过一个全局的message字段来进行快速判断，当然也可以加其他字段比如pass表示是否通过校验，之后是各个表单字段的单独校验结果，在一个真实的校验环境中，有可能需要同时展示多个表单字段校验失败的结果。
+
+之后在通过z.object创建校验工具的时候，需要把校验错误的信息也设置进去，参考ZOD3的文档进行设置，针对不同的错误场景可以设置不同的提示信息。
+
+最后通过`safeParse`返回校验结果，如果成功，可以拿到data属性，如果失败，可以拿到error属性，把失败和成功的结果都要返回。
+
+SERVER ACTION函数转为返回`Promise<State>`，其中第一个入参需要改为`prevState`，这个是客户端使用`useStateAction`的前提。
+
+上面的部分是服务端的处理，完成后每次提交表单，服务端都会返回一个State类型的结果，之后客户端的组件会重新渲染，我们需要客户端的组件拿到这个State并且基于它的结果展示正确或者错误的信息：
+
+```tsx
+import { useActionState } from 'react';
+import { createInvoiceAction, type State } from '@/app/lib/actions';
+
+export default function Form({ customers }: { customers: CustomerField[] }) {
+  const [state, formAction] = useActionState(createInvoiceAction, {} as State);
+  // ... 省略
+  return (
+    <form action={formAction}>
+      <input id="amount" name="amount" type="number" step="0.01" placeholder="Enter USD amount" aria-describedby="amount-error" />
+      <div id="amount-error" aria-live="polite" aria-atomic="true">
+        {state.errors?.amount && (
+          <p className="mt-2 text-sm text-red-500" key={state.errors.customerId}>
+            {state.errors.amount}
+          </p>
+        )}
+      </div>
+    </formAction>
+  )
+}
+```
+
+useActionState需要2个参数，SERVER ACTION以及初始的结果状态，当然如果希望把校验信息展示出来，或者在用户首次打开表单的时候展示一些提示，则可以把初始状态补充完整。它返回2个值，第一个State就是上一次的表单校验状态（或者也可以理解为当前的表单校验状态），第二个是经过封装的SERVER ACTION，应该把它用于form的action属性内。
+
+之后假设我们提交了表单，服务端校验失败返回了新的State并重新渲染了表单组件，此时state就不再是初始值了，那么我们就可以用它来展示错误信息，上述代码通过aria-describedby这个属性来把表单和错误信息的DOM绑定。
+
+总结useActionState：
+
+- 服务端需要定义异常状态对象，以及把SERVER ACTION改为返回`Promise<State>`
+- 客户端需要用useActionState获取当前状态和SERVER ACTION的封装函数，并且基于当前状态里面的错误信息，进行条件渲染
 
 
 
