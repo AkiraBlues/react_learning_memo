@@ -2010,23 +2010,25 @@ REACT不存在此类问题，HOOKS都是在渲染完成后才执行的，整体�
 
 ## NEXTJS学习笔记
 
-这里进入NEXTJS的学习，参考[官网教程](https://nextjs.org/learn/dashboard-app)，另外还要结合油管的教程，由于REACT已经支持了SERVER COMPONENT，之前学习的REACT部分知识点可能需要更新，还可能加入一些WEB3的开发场景用例。
+这里进入NEXTJS的学习，参考[官网教程](https://nextjs.org/docs/app/getting-started)，另外还要结合油管的教程，由于REACT已经支持了SERVER COMPONENT，之前学习的REACT部分知识点可能需要更新，还可能加入一些WEB3的开发场景用例。
 
 
 
 #### 初始化项目
 
-工作空间内执行以下代码：
+WINDOWS11环境下，先安装好`fnm`（NVM的代替），然后用POWERSHELL执行：`npx create-next-app@latest`，之后会有提示，按照下面的选择走：
 
-```powershell
-npx create-next-app@latest nextjs-dashboard --example "https://github.com/vercel/next-learn/tree/main/dashboard/starter-example"
 ```
-
-会安装一个NEXTJS的模板项目，以这个为前提开始学习。
-
-严格模式从NEXTJS的13.5版本之后自动启用。
-
-执行`npm run dev`看效果。
+√ What is your project named? ... nextjs-demo
+√ Would you like to use TypeScript? ... No / Yes
+√ Would you like to use ESLint? ... No / Yes
+√ Would you like to use Tailwind CSS? ... No / Yes
+√ Would you like your code inside a `src/` directory? ... No / Yes
+√ Would you like to use App Router? (recommended) ... No / Yes
+√ Would you like to use Turbopack for `next dev`? ... No / Yes
+√ Would you like to customize the import alias (`@/*` by default)? ... No / Yes
+√ What import alias would you like configured? ... @/*
+```
 
 VSCODE安装一个**alias-tool**插件，参考它的配置，可以支持在TSX内引入CSS时，按住CTRL + 鼠标左键点击可以跳转到对应的CSS文件。
 
@@ -2043,37 +2045,99 @@ TAILWINDCSS兼容性相关配置（以VS CODE为例）：
 
 这样配置就默认所有CSS都会被TAILWINDCSS侵入，使用它的规则和语法，比如`@apply`指令。
 
+总结，一个标准的项目应该是：
 
+- TS
+- ESLINT
+- TAILWIND.CSS
+- APP ROUTER
+- TURBOPACK
+- PATH ALIAS
 
-#### 几个关键文件
-
-NEXTJS的根目录里有几个文件夹的名字是固定的，不可更改，比如：
-
-- app，这个是APP ROUTER的根路径，用于存放APP ROUTER模式下的页面
-
-- pages，这个是PAGES ROUTER（简单理解就是传统的SPA）模式的根路径，里面存放的都必须是传统的在客户端执行的REACT页面和组件
-- public，这个是构建后放在网站根目录的文件和文件夹，比如`favicon.ico`就可以放在这里
-- src，它有点特殊，从一般意义上它表示存放源码的文件夹，可以不创建，不使用，**名字通常可以修改，但是如果根节点没有app和pages文件夹，且src里面有时，这个src文件夹的名字就不能改了，它就表示存放项目源码的文件夹**
-
-app里面的pages.tsx和layout.tsx是根节点组件，layout包裹page，看源码可以发现**layout就是一个布局组件，开放一个children注入，而page里面的默认导出组件就会被注入到layout的children内**。
+之后进入项目，执行`npm run dev`，访问3000端口看效果。
 
 
 
-#### TAILWINDCSS V3基本配置
+#### 入门知识
 
-注意看这个`global.css`文件，它里面有以下引入：
+常用命令：
 
-```css
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+- next dev --turbopack，启动开发服务器，并选择构建工具是TURBOPACK
+- next build，编译构建，在此过程中通常会生成一些静态的网页文件，及静态渲染
+- next start，启动生产模式服务器，此时会直接使用next build的产物，即此时修改源码不会导致项目的变动
+- next lint，ESLINT语法检查
+
+路由，传统的SPA是前端路由，原理是通过HASH或者拦截浏览器的history来控制修改URL但不触发页面完整刷新，然后操作JS替换DOM以实现页面随URL变化而变化。SPA带来了一些问题，比如首次渲染耗时过长，不利于SEO等等，NEXTJS在13版本之前也是以PAGES ROUTER（即SPA）为主，从13版本开始引入了**APP ROUTER，即保留了SPA优点且支持SSR的路由**，从14版本开始APP ROUTER是默认的推荐配置。
+
+关于APP ROUTER的原理，这里只提几个核心机制：
+
+- 前端路由（history模式）和SSR并存，服务端渲染和客户端REACT运行时并存
+- 水合机制是连接服务端组件和客户端渲染的桥梁
+- 首次渲染采用SSR，并加载REACT运行时和前端路由，NEXTJS无法保证所有的DOM都是SSR出来的，但是在精心设计下可以保证大部分网页内容可以被爬虫收录
+- 后续交互基于前端路由，但是每次会去后端请求RSC（React Server Component），结合REACT的水合机制，获取组件并替换DOM
+
+NEXTJS对项目结构有要求，创建首个页面，需要先创建app文件夹，然后在内部创建layout.tsx和page.tsx，其中每个项目必须至少有一个layout.tsx，它表示布局，而page是当前路由对应的页面组件，页面组件要放在一个布局组件内才能构成完整的页面，所以每个项目至少要有一个layout.tsx，它通常这样写：
+
+```tsx
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  )
+}
 ```
 
-这个`@tailwind`是一个指令，在V4版本已经移除。
+layout.tsx需要把children声明到JSX内，以便页面组件可以注入。
+
+至于page.tsx可以随意，只要返回一个默认的组件就行了，比如最简单的hello world也可以：
+
+```tsx
+export default function Page() {
+  return <h1>Hello, Next.js!</h1>
+}
+```
+
+TYPESCRIPT配置，略……
+
+路径别名配置，略……
+
+ESLINT配置，略……
+
+TAILWINDCSS配置，略……，本笔记用的是V4版本
 
 
 
-#### 用TAILWINDCSS实现一个三角形
+#### NEXTJS项目结构
+
+注意NEXTJS的项目采用的是**约定大于配置**的规则，这个原则可以在很多地方看到，即**一些文件名，变量名，和JS语法一样是属于关键词，不可修改**。
+
+注意：以下根路径内的文件夹名称都是属于关键词，不可修改：
+
+| 文件夹名称 | 含义                                                         |
+| ---------- | ------------------------------------------------------------ |
+| app        | App Router                                                   |
+| pages      | Pages Router，即传统的SPA模式下的路由                        |
+| public     | 静态资源存放位置，比如favicon.ico                            |
+| src        | NEXTJS官方不推荐的文件夹，兼容老项目用，比如src/app，也是APP ROUTER，src/pages，也是PAGES ROUTER，但是这个模式不能和根目录的app / pages同时存在，即要么你的项目就是一个src作为所有源码的根路径，要么就不要它 |
+
+其他的代码，工具性的，库，或者CSS相关的，一般会放在lib文件夹内，或者bin，这个名称可以自己定义。
+
+NEXTJS的配置文件是next.config.ts。
+
+TAILWINDCSS的配置文件是postcss.config.mjs。
+
+其他的都是前端项目常见的。
+
+
+
+#### TAILWINDCSS介绍
+
+这个本质上就是一个CSS的预处理工具，它把CSS进行了一定程度的抽象，但保持了CSS的原子化特点，使得编写起来非常方便，比如一个原始的CSS，`padding-left: 3px; padding-right: 3px`，用TAILWINDCSS写就是`px-[3px]`，下面是一个用TAILWINDCSS实现的三角形：
 
 ```html
 <div className="border-l-[15px] border-r-[15px] border-b-[26px] border-l-transparent border-r-transparent border-b-black"></div>
@@ -2084,6 +2148,27 @@ app里面的pages.tsx和layout.tsx是根节点组件，layout包裹page，看源
 `border-l-transparent`表示左侧边框透明。
 
 上述代码的意思是，构建一个盒子，左侧右侧边框15PX且透明，底部边框26PX且颜色是黑色。
+
+TAILWINDCSS定义了很多原子化的样式，写的时候直接用，因为它提供了丰富的带有一定程度抽象的原子化，以及支持响应式设计，可以满足大部分项目的UI设计，因此是目前最流行的配合REACT的样式，如果还觉得麻烦，那么建议直接上UI库。
+
+它的几个优点：
+
+- 丰富的原子化的样式
+- 可配置
+- 支持响应式
+- 支持摇树，未使用的样式不会被打包
+- 没有运行时，所以支持SSR
+- 基于它也有一些REACT的UI库可以用，比如shadcn/ui，TAILWIND UI等等
+
+安装使用参考官方教程，配置还是比较简单的。
+
+
+
+#### APP ROUTER路由介绍
+
+路由机制，文件系统，编写规范，对应关键词文件，路由的嵌套，分组……待补充
+
+
 
 
 
