@@ -2097,8 +2097,12 @@ layout.tsx需要把children声明到JSX内，以便页面组件可以注入。
 至于page.tsx可以随意，只要返回一个默认的组件就行了，比如最简单的hello world也可以：
 
 ```tsx
-export default function Page() {
-  return <h1>Hello, Next.js!</h1>
+export default function Home() {
+  return (
+    <div className="flex justify-center">
+      <h2 className="text-center pt-8 text-4xl">Hello NextJS!</h2>
+    </div>
+  );
 }
 ```
 
@@ -2108,7 +2112,7 @@ TYPESCRIPT配置，略……
 
 ESLINT配置，略……
 
-TAILWINDCSS配置，略……，本笔记用的是V4版本
+TAILWINDCSS配置，略……，本笔记用的是V4版本。
 
 
 
@@ -2164,11 +2168,258 @@ TAILWINDCSS定义了很多原子化的样式，写的时候直接用，因为它
 
 
 
+#### 组件结构
+
+每个路由都允许一个layout，每个路由都必须要有一个page。全局项目必须要有一个根layout。
+
+layout是只会挂载一次的（除非对应的路由发生变化），它和路由挂钩，即：
+
+- `/`对应一个layout
+- `/foo`，可以有一个子layout在`/foo/layout.tsx`这个位置，也可以没有
+- 如果当前的路由没有layout，NEXTJS会套用它的最近的祖先级别的layout，如果都没有，那么就会用到根layout
+- 必须暴露一个children属性，以便后续的page或者其他子组件注入
+
+一个简单的layout的例子：
+
+```tsx
+export default function RootLayout({children}: Readonly<{children: React.ReactNode;}>) {
+  return (
+    <html lang="en">
+      <body>
+        {children}
+      </body>
+    </html>
+  );
+}
+```
+
+只有项目的根layout需要包含html标签和body标签，且children必须放在body内，其他的子路由的layout可以是任意的DOM里面包含children。
+
+NEXTJS的路由是基于文件系统的，即如果需要构造一个`/foo/bar/bartz`，那么必须有`/foo/bar/bartz/page.tsx`这个文件。关于路由的文件系统，后面会再介绍。这里只需要知道每个page对应一个路由页面的核心组件。
+
+在layout和page之间还允许其他的组件，比如template，它本质上是一个动态layout，即如果它下面的子路由发生变化，比如：
+
+- `/foo/template.tsx`和`/foo/page.tsx`，对应的是路由`/foo`
+- `/foo/bar/page.tsx`，`/foo/bartz/page.tsx`，对应`/foo/bar`路由和`/foo/bartz`路由，它们都是`/foo`的子路由
+- 此时如果从/foo切换到它的子路由，或者切换回来，只要还是在/foo这个路由内部去切换，那么template就会在每次切换时重置
+
+一般用于一些UI动效相关的场景，比如切换时需要播放一个动画，那么就可以用这个组件来实现，因为它每次切换都相当于重新销毁后再创建，为此它也要具有包含子组件的能力，它也可以声明children属性。它和layout，page同时存在时，结构是这样的：
+
+```
+├── layout
+  ├── template
+    ├── page
+```
+
+还有一个可选的特殊组件是head.tsx，它用来给当前页面添加`<head>`标签内的信息，比如title和meta信息，它也有继承关系：
+
+- 每个特定路由只允许一个page.tsx和一个head.tsx
+- 子路由可以有自己的head.tsx
+- 如果子路由没有head.tsx，则复用最近祖先的head.tsx，如果组件的也不存在，则就是没有
+- 如果**子路由的head和最近祖先的有冲突，则以子路由的为准，如果没有冲突，那么子路由的和祖先的都会生效（这点很关键）**
+
+一个简单的head.tsx的例子：
+
+```tsx
+export default function Head() {
+  return (
+    <>
+      <title>My App</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <meta name="description" content="Default app description." />
+    </>
+  );
+}
+```
+
+head一般用于SEO场景，这样结构就变成这样了：
+
+```
+├── head
+├── layout
+  ├── template
+    ├── page
+```
+
+当然实际的结构是在一个文件夹内，这些文件都是并列存在的，只是在渲染关系上它们如上图。
+
+还有几个类似拦截器的组件，分别是loading.tsx，error.tsx和not-found.tsx。它们的结构是这样的：
+
+- 它们都是作为拦截器使用，即有时候可以通过，有时候需要拦截
+- 作用层级都是在layout和template内，在page之上
+- 如果page是异步的，且提供了loading，则优先展示loading
+- 如果在任何环节出现了异常，且不处理异常而是直接抛出，则展示error
+- 如果手动调用了`notFound()`，则会展示notFound
+- **notFound和error是互斥关系，因为它们本质上都是异常，会产生终止信号，导致调用一方后，另外一方不会再执行**
+
+加上拦截器后，结构梳理一下：
+
+```
+├── head
+├── layout
+  ├── template
+    ├── error | notFound【这里可以放行也可以拦截】
+      ├── loading【只能拦截一次】
+        ├── page
+```
+
+
+
+#### 服务端组件（RSC）和客户端组件（RCC）入门
+
+发现后面的知识点必须要基于是RSC还是RCC场景，因此需要先点出这个区别。
+
+什么是组件，简单来说就是一个具有一定自洽性的DOM，**不要理解为一定要具有丰富的可交互性，一个只包含超链接的组件也是组件**。
+
+服务端组件，React Server Component是NEXTJS的默认组件模式，从名字上看，它就是一个在服务端运行和渲染的组件，虽然最终呈现都是体现为客户端的HTML字符串，但是**RSC的核心运算过程都是在服务端完成的**，之后，它把结果，一个PAYLOAD，即一个JSON结构的包含了运算结果的数据，发送到客户端，由客户端的REACT运行时进行具体的DOM创建和挂载。这个PAYLOAD从结构上看有点类似虚拟DOM，但是**它是纯粹的JSON数据，而虚拟DOM实际上是用JS代码表示的对象**。
+
+客户端组件，React Client Component是传统的SPA模式下的组件，NEXTJS也兼容，从名字上看，它是在客户端运行和渲染的组件，即它的核心运算过程是在客户端完成的，服务端只是把运行所需的JS代码提供给客户端，由客户端的REACT运行时负责执行和处理JSX和最终挂载DOM。
+
+由于NEXTJS依然遵循单个JS文件就是单个模块的行为，因此如果要声明RCC，需要单开一个文件，**不能在同一个文件内同时声明RSC和RCC，只能选择一类**。
+
+使用`'use client';`来把当前模块内的组件都视为RCC。
+
+RSC和RCC最大的区别是，**RSC不能带有任何REACT HOOKS以及和事件交互相关的元素，即任何需要在DOM渲染完成后才能做的事情，都必须在客户端完成**，如果带有了这部分事情，即带有了副作用，那么它就只能是RCC，**RSC的产物只有JSON数据，没有其他**。
+
+**NEXTJS设计RSC和RCC，是为了在SEO，首次渲染耗时，用户体验等问题之间找到一个平衡点**。通常来说，RSC应该专注于渲染数据，然后通过`children`属性给RCC留出位置，以便支持交互。有时候这个很难区分，比如某些页面既要包含数据但是又非常注重交互，这个很挑战开发者的设计和解耦的能力，NEXTJS希望开发者尽量把内容都放到服务端组件内，所以RCC应该尽可能地原子化。
+
+RSC和RCC的组合问题，NEXTJS只支持以下场景：
+
+- 全部都是RSC
+- 全部都是RCC
+- 父组件是RSC，子组件是RSC或RCC
+
+由于NEXTJS不具备在浏览器环境下执行JS代码的能力，因此它禁止父组件是RCC+子组件是RSC这种设计。
+
+如果全部都是RSC，则所有内容都是在服务端渲染为JSON，之后传递给客户端，由REACT运行时负责处理。
+
+如果全部都是RCC，则所有内容都是以JS代码的方式传递给客户端，之后由REACT运行时负责运行，解析JSX并生成DOM。
+
+如果父组件是RSC，子组件是RCC，则父组件会被渲染为JSON，同时保留一个子组件的占位符，子组件的部分会在后续以JS的形式被传递到客户端，客户端对于JSON的部分依然是直接生成DOM，之后会运行子组件的JS，生成客户端组件，注入到父组件RSC的占位符内，这一过程叫水合（注水，hydration），以形成一个完整的具有交互能力的页面。**上述逻辑在首次渲染和后续渲染都是一样的**。
+
+NEXTJS在客户端保留了REACT运行时，因此实际上也包含了一个前端路由，当用户操作页面跳转时，会通过前端路由去操作history，修改URL而避免页面完整刷新，然后发送请求到服务端，之后目标页面的处理，和首次渲染一样，最终会得到新的组件，并卸载当前的局部组件，和挂载新的组件。
+
+水合是NEXTJS的混合渲染设计，较好地兼顾了SPA和SEO的问题，当然也需要开发者把页面主体内容以RSC的形式呈现。如果开发者完全使用RCC开发，对SEO不会有帮助，SPA的问题也不会得到解决。
+
+
+
 #### APP ROUTER路由介绍
 
-路由机制，文件系统，编写规范，对应关键词文件，路由的嵌套，分组……待补充
+##### 基于文件系统的路由
+
+APP ROUTER基于文件系统，假设需要一个`/foo/bar/bartz`，那么只需要有`/foo/bar/bartz/page.tsx`就可以，中间的文件夹有没有page都不重要，也因此，可以把业务代码，非页面组件代码，都放到APP内，只要不提供page或者route.tsx文件（用于API路由）即可。
 
 
+
+##### 规避存放page.tsx导致的内部结构暴露
+
+假设某个团队成员不小心把一个page.tsx放在了一个内部实现的文件夹内，那么外部都可以通过访问这个路径，了解到项目内部实现的代码结构，比如`/lib/encrypt/aes256/page.tsx`，**为了避免内部实现的文件夹和路由文件混用，可以用`_`下划线作为前缀命名文件夹**，比如`_lib`，这样这个文件夹和其子文件夹，都不会被视为潜在的路由文件系统的一部分，即使它内部有page.tsx，也只会被视为一个普通的模块文件。
+
+
+
+##### 文件系统路由的分组管理
+
+文件系统路由好是好，但是它的文件结构会导致一定的管理困难，比如一个项目有前台路由和后台管理员路由2类业务区分，当然我们可以用`front`和`back`作为文件夹名称来定义路由，但是如果牵扯的范围更广或者更复杂，需要对路由进一步细化分组时，可以用`(group_name_folder)`这种带括号的文件夹来管理路由，它的好处是只充当一个路由文件系统的抽象层分组，不会影响到URL，比如：
+
+```
+├── app
+  ├── (front)
+    ├── home
+      ├── page.tsx
+    ├── about
+      ├── page.tsx     
+  ├── (admin)
+    ├── login
+      ├── page.tsx
+```
+
+在这个结构下的路由，带括号的文件夹不会影响URL，所以可用的路由是：`/home`，`/about`，`/login`。
+
+建议分组规则是基于业务，团队，项目分层，技术架构等等。
+
+分组管理还有一个好处是可以把layout / template / head / error / not-found / loading等用于不同的路由分组，直接声明在分组文件夹内，使得`/home`，`/about`用的是layout1，而`/login`及后续的dashboard等可以用到layout2。
+
+
+
+##### 路由跳转
+
+由于NEXTJS是侧重SSR的，因此它在路由跳转上也倾向于采用传统的超链接方案，通过link组件进行控制，比如：
+
+```tsx
+import Link from 'next/link';
+
+export default function Page() {
+  return (
+    <Link href="/blog">to blog</Link>
+  );
+}
+```
+
+link组件是一个客户端组件，因为它最后会被渲染为a组件，点击后请求的是RSC，而非整个页面，说明它启用了事件机制，拦截了默认的行为。RSC不设计事件机制，因此只能用link组件让用户来手动点击跳转。
+
+如果需要在RCC，比如表单场景下进行命令式控制，即需要先执行业务逻辑，通过后才能跳转时，可以使用`useRouter`这个HOOK，用法如下：
+
+```tsx
+'use client'
+ 
+import { useRouter } from 'next/navigation'
+ 
+export default function Page() {
+  const router = useRouter()
+ 
+  return (
+    <button type="button" onClick={() => router.push('/dashboard')}>
+      Dashboard
+    </button>
+  )
+}
+```
+
+
+
+##### 路由传参和动态路由
+
+NEXTJS的APP ROUTER支持路由传参，和其他的前端框架类似，它支持2种类型的路由传参：
+
+- `/foo/bar?key1=value1&ke2=value2`，这个是最传统的URL传参
+- `/blog/hex_id_1/view`，`/blog/hex_id_2/view`，这种，把部分参数写到URL的path部分，需要解析path的，也是传参，一般需要对应动态路由
+
+RSC场景下，通过searchParams属性获取URL的QUERY部分，通过params获取URL的PATH部分的传参，比如：
+
+```tsx
+export default function Page({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
+  return <h1>My Page</h1>
+}
+```
+
+TS下组件的params和searchParams应该加上类型标注。
+
+RCC场景下，通过useSearchParams和useParams这2个HOOK来处理相同的问题。
+
+动态路由就是把传参写到URL的PATH部分内，理论上这个值可以有无数个，因此不可能针对每个都搞一个文件夹并声明一个组件，所以NEXTJS提供了动态路由来处理这个问题。
+
+假设我们的URL是这样传参的：`/id`，那么就在app路径下新增一个文件夹，名称就叫`[id]`，里面的page.tsx这样写：
+
+```tsx
+type Params = Promise<{
+    id: string;
+}>;
+
+export default async function Page({ params }: {params: Params}) {
+    const p = await params; // 注意带入参的RSC应该写为异步的，这个也是NEXTJS的设计，因为通常实际业务需要拿到这个参数去做数据库查询
+    return (
+        <h4>you are visiting {p.id} page</h4>
+    )
+}
+```
+
+动态路由后面会再提到，比如结合NEXTJS的构建时静态渲染功能，可以在事先知道所有可能入参的情况下去构建出所有的页面，以及如何处理通过PATH传递多个参数的问题等等。
 
 
 
@@ -2448,12 +2699,6 @@ export default function NavLinks() {
 `usePathname`拿到的根路径，如果是在首页则是`/`，之后就是一个以`/foo`开头的路径，不会包含QUERY的部分。
 
 
-
-#### 客户端路由跳转方案
-
-- 使用link组件，预先写好HREF，用户点击后就可以跳转
-- 使用`useRouter`，进行手动控制的跳转
-- 如果客户端组件是表单，提交表单后，客户端会预期收到响应码303，即下一个跳转地址，服务端可以通过`redirect`命令控制跳转地址，客户端收到地址后就会跳转
 
 
 
@@ -3203,3 +3448,15 @@ className="sm:block md:hiden"
 ```
 
 即小于md断点等于或高于sm断点时展示为块，等于和超出md时不展示。
+
+
+
+## 附录--常用ASCII树符号
+
+```
+├ ─ └ │ ┌ ┐ ┬ ┼ ┘ ┤
+├──
+└──
+│
+```
+
