@@ -4,6 +4,18 @@
 
 
 
+#### 设计理念
+
+REACT是脸书团队设计的。
+
+前端框架大都采用MVVM框架，MODEL本身是对象，但是采用了观察/订阅者模式，因此当MODEL有变动时，会去更新UI，这些都是常规操作了。
+
+**MVVM的设计，核心是构造一个修改 => 订阅机制，即MODEL，这个机制会鼓励开发者去不停修改MODEL（数据对象），但数据对象的结构可能会非常复杂**，因此脸书希望能简化对MODEL的修改，即**开发者使用React框架时，应该不需要编写太多和Mutation相关的代码，以及框架应该尽量减少Mutation，以及对它做管理**。
+
+**REACT团队认为，编写UI最简单的方式就是避免MODEL的修改，即UI要基于静态数据构造，当MODEL变动时，销毁整个UI，从头开始创建，对开发和维护来说最为简单。**
+
+
+
 #### Hello World
 
 这里先从[PLAYGROUND](https://playcode.io/react)开始吧。
@@ -2139,7 +2151,7 @@ TAILWINDCSS的配置文件是postcss.config.mjs。
 
 
 
-#### TAILWINDCSS介绍
+#### CSS建议使用TAILWINDCSS
 
 这个本质上就是一个CSS的预处理工具，它把CSS进行了一定程度的抽象，但保持了CSS的原子化特点，使得编写起来非常方便，比如一个原始的CSS，`padding-left: 3px; padding-right: 3px`，用TAILWINDCSS写就是`px-[3px]`，下面是一个用TAILWINDCSS实现的三角形：
 
@@ -2165,6 +2177,70 @@ TAILWINDCSS定义了很多原子化的样式，写的时候直接用，因为它
 - 基于它也有一些REACT的UI库可以用，比如shadcn/ui，TAILWIND UI等等
 
 安装使用参考官方教程，配置还是比较简单的。
+
+CSS本身支持模块化，比如声明一个`foo.module.css`，必须以`.module.css`结尾，然后在REACT组件内使用，这个就是一个模块，但是TAILWINDCSS不建议这样做，因为**它会破坏TAILWINDCSS对DOM样式的感知**，更好的策略是直接写在`global.css`内，然后团队成员做好区分就可以，比如上述的三角形：
+
+```css
+.triangle-normal-black {
+  @apply border-l-[15px] border-r-[15px] border-b-[26px] border-l-transparent border-r-transparent border-b-black;
+}
+```
+
+其实就是声明了一个CSS样式，加上了`@apply`以套用TAILWINDCSS的语法，然后直接在组件内使用：
+
+```html
+<div className="triangle-normal-black"></div>
+```
+
+后续可以复用的样式都可以这样写，团队协作时做好沟通和业务分离就可以。
+
+
+
+####  引入CLSX
+
+CLSX用于处理条件渲染样式的问题，原生的REACT面对这个问题是这样处理的：
+
+```jsx
+<button className={ isActive ? 'bg-blue-500 text-white' : 'bg-gray-100 text-black' }>
+  Click me
+</button>
+```
+
+而CLSX是这样处理的：
+
+```jsx
+import clsx from 'clsx';
+
+<button className={clsx(
+  'px-4 py-2 rounded', 
+  isActive ? 'bg-blue-500 text-white' : 'bg-gray-100 text-black',
+  isDisabled && 'opacity-50 cursor-not-allowed'
+)}>
+  Click me
+</button>
+```
+
+相比原生REACT来说有一些优化，首先它内部支持通过逗号来声明多个样式，如果是原生REACT，要支持一部分公用一部分条件渲染，则必须写为：
+
+```jsx
+className={`common-style ${condition ? 'style-a' : 'style-b'}`}
+```
+
+需要结合字符串模板，JSX的表达式，以及注意引号位置，而CLSX对此进行了简化：
+
+```jsx
+className={clsx('common-style', condition ? 'style-a' : 'style-b', condition && 'style-c')}
+```
+
+相比原生REACT写法，更加接近原生的CSS，同时兼顾了条件渲染，因此结合TAILWINDCSS推荐使用，参考[文档](https://github.com/lukeed/clsx)可以看到，这个工具非常灵活，可以支持多个风格混合使用。
+
+结合上述的抽离可复用的样式，可以这样写：
+
+```tsx
+<div className={clsx("relative w-0 h-0", true && "triangle-normal-black")}></div>
+```
+
+推荐使用CLSX，可以大大简化样式的操作难度。
 
 
 
@@ -2423,75 +2499,153 @@ export default async function Page({ params }: {params: Params}) {
 
 
 
-#### 抽离可复用的样式
+#### 页面跳转的优化
 
-CSS本身支持模块化，比如声明一个`foo.module.css`，必须以`.module.css`结尾，然后在REACT组件内使用，这个就是一个模块，但是TAILWINDCSS不建议这样做，因为**它会破坏TAILWINDCSS对DOM样式的感知**，更好的策略是直接写在`global.css`内，然后团队成员做好区分就可以，比如上述的三角形：
+大纲：
 
-```css
-.triangle-normal-black {
-  @apply border-l-[15px] border-r-[15px] border-b-[26px] border-l-transparent border-r-transparent border-b-black;
+- NEXTJS默认静态渲染，也支持动态渲染
+- LINK组件带有PREFETCH技术，可以减少跳转响应耗时
+- 针对动态渲染，可以使用串流技术
+- 客户端的REACT运行时会保证页面跳转不会导致强制刷新，而是类似SPA的组件请求和局部替换
+
+NEXTJS默认采用SSR方案，即通过link标签或者客户端组件的useRouter，通常都是在请求新的RSC，进行局部的DOM替换。
+
+NEXTJS会在构建时采用静态渲染，即对于可能的URL，先渲染出实际的RSC的PAYLOAD（即JSON），然后请求时不再进行运算，直接返回结果。**比如某个页面需要从数据库查询数据，NEXTJS会在构建时就执行这个查询，拿到了数据后构造PAYLOAD，然后这个PAYLOAD就是静态的了，后续即使修改了数据库，它也不会变**。
+
+NEXTJS也支持动态渲染，需要额外配置。
+
+开发模式下可以通过左下角的指示器来确认当前页面是静态还是动态渲染的，这个指示器也可以配置。
+
+SPA常用的prefetch机制，在SSR场景下也可以使用，NEXTJS的link组件除了是一个RCC外，还支持监听VIEWPORT，即当这个LINK组件进入了VIEWPORT后，NEXTJS给它添加的事件会使得它在当前HTML内加一个link rel="prefetch"标签，这样就会强迫浏览器去下载这个组件对应的HREF的内容，有了缓存后当用户点击这个link，跳转时就会优先使用缓存。
+
+**如果目标HREF对应的组件是配置为了动态渲染的组件，则PREFETCH不会生效，除非目标组件提供了LOADING.TSX，即确定的加载组件，此时NEXTJS会让浏览器去PREFETCH这个LOADING.TSX**。
+
+可以通过配置link组件的`prefetch={false}`来限制它的这个行为，在某些场景下如果背景下载特定路由会导致带宽不够，可以使用。还可以自己封装一个LINK组件以优化PREFETCH的逻辑，比如只在HOVER的时候开启PREFETCH：
+
+```tsx
+'use client'
+ 
+import Link from 'next/link'
+import { useState } from 'react'
+ 
+function HoverPrefetchLink({
+  href,
+  children,
+}: {
+  href: string
+  children: React.ReactNode
+}) {
+  const [active, setActive] = useState(false)
+ 
+  return (
+    <Link
+      href={href}
+      prefetch={active ? null : false}
+      onMouseEnter={() => setActive(true)}
+    >
+      {children}
+    </Link>
+  )
 }
 ```
 
-其实就是声明了一个CSS样式，加上了`@apply`以套用TAILWINDCSS的语法，然后直接在组件内使用：
+如果跳转目标是动态渲染的RSC，一般它都会进行一些异步操作来增加耗时，此时可以使用串流技术（后面会再提到）加一个LOADING.TSX，或者通过SUSPENSE组件来创建一个加载页面 / 组件，以减少用户感受到空白或者无响应的时间。
 
-```html
-<div className="triangle-normal-black"></div>
-```
-
-后续可以复用的样式都可以这样写，团队协作时做好沟通和业务分离就可以。
+NEXTJS渲染出的所有页面都会带有一个REACT运行时，如果是爬虫或者用户强制URL刷新，那么每次返回的页面都会通过一个script标签引入REACT运行时，如果用户是在应用内跳转，则这个REACT运行时会通过前端路由来保证页面不会强制刷新，而是下载新的RSC以替换局部的DOM，其他部分的组件和状态不会受到影响。
 
 
 
-####  引入CLSX
+#### 串流技术
 
-CLSX用于处理条件渲染样式的问题，原生的REACT面对这个问题是这样处理的：
+串流技术一般用于动态渲染的场景，目的是解决一个页面需要查询多个数据并返回多个组件的耗时问题，通常来说我们使用`Promise.all`来并行查询，但是**最终页面的返回取决于耗时最长的那个查询**，在某些场景下这是不友好的。
 
-```jsx
-<button className={ isActive ? 'bg-blue-500 text-white' : 'bg-gray-100 text-black' }>
-  Click me
-</button>
-```
+比如一个设置页面，大部分设置信息都是本地存储或者依赖非常高效的本地数据库，但是涉及网络和会员等的设置，或者运营方的设置，需要请求额外的API，以及更长的耗时，此时，我们可以优先把已经完成的信息返回给用户，耗时更长的信息可以在获取后再串流返回，这个就是串流技术的作用。
 
-而CLSX是这样处理的：
+简单来说串流技术是这样使用的：
 
-```jsx
-import clsx from 'clsx';
+- 基于HTTP1.1及以后的一个协议，叫`Transfer-Encoding: chunked`，这个协议**支持分块传输响应**，一般用于文件下载，但是从REACT18版本开始，NEXTJS也支持了，目的就是用于串流服务端组件，即服务器可以先传输一部分信息（比如预渲染的加载动画或者本地静态渲染的数据），之后再传输另一部分信息（耗时更长的动态渲染数据），在此期间客户端和服务器的连接会一直保持
+- NEXTJS服务端先返回一些耗时短的HTML，对于耗时长的组件，先返回一个占位符的HTML，这样客户端可以快速展示
+- 之后NEXTJS继续完成耗时长的查询，并返回后续的服务端组件
+- 允许在客户端的REACT，接收到这部分信息后，执行简单的替换代码（或许会用到水合，如果服务端返回的是客户端组件），把对应的占位符HTML替换为真实的服务端组件
+- **数据查询的逻辑需要迁移到子组件内，因为只有子组件本身负责初始化才能避免同时请求多个数据时耗时最长的那个拖慢整体响应的问题，**否则还是在父组件层级进行等待，其他细节后面会提到
+- SEO友好问题，墙内的百度就免谈了，全球来说，这种串流技术对谷歌的爬虫是友好的，因为**谷歌的爬虫可以执行JS，而且只要后续在一个合理耗时内返回动态渲染的组件，那么谷歌的爬虫是愿意等待的，也会在等待后执行JS以拿到真实的页面**，当然如果某个组件耗时太长，不要说SEO了，用户都会提意见
 
-<button className={clsx(
-  'px-4 py-2 rounded', 
-  isActive ? 'bg-blue-500 text-white' : 'bg-gray-100 text-black',
-  isDisabled && 'opacity-50 cursor-not-allowed'
-)}>
-  Click me
-</button>
-```
+具体的代码编写思路是这样的：
 
-相比原生REACT来说有一些优化，首先它内部支持通过逗号来声明多个样式，如果是原生REACT，要支持一部分公用一部分条件渲染，则必须写为：
+- 在页面层面，可以声明一个`loading.tsx`，用于直接返回结果，NEXTJS的约定配置是，基于文件系统的页面中，如果包含`loadint.tsx`，则优先返回它，之后当耗时的真实渲染完成后，再返回`page.tsx`
+- 在组件层面，可以通过`Suspense`组件来实现相同的效果，先直接返回占位的组件，再返回渲染好的真实组件
 
-```jsx
-className={`common-style ${condition ? 'style-a' : 'style-b'}`}
-```
-
-需要结合字符串模板，JSX的表达式，以及注意引号位置，而CLSX对此进行了简化：
-
-```jsx
-className={clsx('common-style', condition ? 'style-a' : 'style-b', condition && 'style-c')}
-```
-
-相比原生REACT写法，更加接近原生的CSS，同时兼顾了条件渲染，因此结合TAILWINDCSS推荐使用，参考[文档](https://github.com/lukeed/clsx)可以看到，这个工具非常灵活，可以支持多个风格混合使用。
-
-结合上述的抽离可复用的样式，可以这样写：
+比如页面层面，这个是NEXTJS自带的功能，基于约定大于配置的原则，声明好了就可以，比如：
 
 ```tsx
-<div className={clsx("relative w-0 h-0", true && "triangle-normal-black")}></div>
+import DashboardSkeleton from '@/app/ui/skeletons';
+
+export default function Loading() {
+  return <DashboardSkeleton />;
+}
 ```
 
-推荐使用CLSX，可以大大简化样式的操作难度。
+默认的规则是，如果`page.tsx`是需要异步的，则先展示loading再展示page，反之如果`page.tsx`是同步的，直接展示page。此外，NEXTJS规定**这个`loading.tsx`必须只能执行同步代码，只能是同步的立刻渲染**。
+
+要验证也很简单，在page里面加一段延迟渲染的wait代码即可，可以发现优先展示了骨架图，之后再展示page。打开调试工具也可以看到首个page请求的瀑布流耗时持续到了最后，请求头里面有`Transfer-Encoding:chunked`。
+
+组件的单个串流，父组件的部分这样写：
+
+```jsx
+import { Suspense } from 'react'; 
+import { RevenueChartSkeleton } from '@/app/ui/skeletons';
+import RevenueChart from '@/app/ui/dashboard/revenue-chart';
+
+export default function MyPage() {
+  return (
+    <Suspense fallback={<RevenueChartSkeleton />}>
+      <RevenueChart />
+    </Suspense>
+  );
+}
+```
+
+至于子组件，内部要写请求数据的逻辑，因此要用`async / await`语法。
+
+总结：
+
+- 父组件用Suspense包裹子组件，并提供子组件渲染完成之前的效果
+- **父组件内不要写数据请求逻辑，转移到子组件内完成，确保子组件是一个async函数，需要耗时来渲染**
+- 子组件渲染完成并返回后，服务端会把这部分响应给客户端，之后客户端的REACT会负责把这部分替换掉之前的渲染部分
 
 
 
-#### 添加自定义字体
+#### 动态路由和预渲染
+
+可以使用`generateStaticParams`在动态路由场景下给出可能的PATH值，以实现构建时就先生成对应的静态页面，使用后，它会带来以下特点：
+
+- dev模式下无效，即使你写了几个值，访问在这个值之外的部分也是可以的
+- 在生产模式下，访问在这个值之外的部分，会导致404
+
+用法：
+
+```tsx
+type Params = Promise<{
+    id: string;
+}>;
+
+export default async function Page({ params }: {params: Params}) {
+    const p = await params;
+    return (
+        <h4>you are visiting {p.id} page</h4>
+    )
+}
+
+export async function generateStaticParams() {
+    return [{id: 'a'}, {id: 'b'}];
+}
+
+export const dynamicParams = false; // 注意NEXJS15要求必须要加这个，不然当处理范围外参数时会回到动态渲染
+```
+
+
+
+#### 字体配置
 
 NEXTJS支持开发者从一些预定义的库里面去下载字体，然后直接打包到最终产品内，这样用户访问页面时可以直接下载最终产品内的字体，而不用去第三方库内下载字体，**本质上用户还是要下载字体的**。
 
@@ -2529,7 +2683,7 @@ import { lxgw_wenkai_tc } from './ui/fonts';
 
 
 
-#### 使用图片组件以优化图片展示
+#### 图片组件
 
 NEXTJS通过一个`<Image>`组件可以实现图片的优化，具体来说：
 
@@ -2546,7 +2700,60 @@ import Image from 'next/image';
 <Image src="/hero-desktop.png" width={1000} height={760} className="hidden md:block" alt="dashborad screenshots" />
 ```
 
-注意NEXTJS组件对所有引入的图片都有必填属性的要求。
+注意NEXTJS组件对所有引入的图片都有必填属性的要求，src和alt是必填项目。
+
+with和height不是必填项目，但是如果这个图片是来自于本地的，则可以先把它import进来，这样NEXTJS在构建时会知道它的尺寸，也就不再需要去写width和height了：
+
+```tsx
+import Image from 'next/image'
+import ProfileImage from './profile.png'
+ 
+export default function Page() {
+  return (
+    <Image
+      src={ProfileImage}
+      alt="Picture of the author"
+      // width={500} automatically provided
+      // height={500} automatically provided
+      // blurDataURL="data:..." automatically provided
+      // placeholder="blur" // Optional blur-up while loading
+    />
+  )
+}
+```
+
+对于动态尺寸的处理，样例代码：
+
+```tsx
+import Image from 'next/image';
+
+export default function Page() {
+  return (
+    <Image
+      src="/images/dog.jpg"
+      alt="A dog"
+      width={800}
+      height={600}
+      sizes="(max-width: 768px) 100vw, 50vw"
+    />
+  );
+}
+```
+
+上述代码的意思是，如果设备的逻辑宽度不超过768PX（media-query的配置），则展示为100vw，如果超过了，展示为50vw。
+
+底层，**NEXTJS在服务端有一个图片压缩工具**，支持压缩的格式有：
+
+- JPG / JPEG
+- PNG
+- WebP
+- AVIF (v12+)
+- GIF （不支持压缩）
+- SVG （本身就是无级别缩放的，也不需要压缩）
+
+NEXTJS在运行时对图片进行压缩，对于每个尺寸的图片，只会压缩一次，之后作为运行时的缓存。如果客户端浏览器支持，NEXTJS会优先转为WEBP和AVIG，如果不支持，则按照原格式压缩。
+
+通常NEXTJS压缩后的图片会存放在服务器的.next/cache/image内，如果没有其他操作，默认是会一直保留的，如果修改了代码或者图片，最好执行一下next build以清除所有的图片缓存。
 
 
 
@@ -2883,64 +3090,6 @@ NEXJS的默认构建策略是静态渲染，这表示如果我们不做任何事
 这里后续一定要补充`revalidatePath`以及相关的知识点。
 
 
-
-#### 串流技术
-
-串流技术一般用于动态渲染的场景，目的是解决一个页面需要查询多个数据并返回多个组件的耗时问题，通常来说我们使用`Promise.all`来并行查询，但是**最终页面的返回取决于耗时最长的那个查询**，在某些场景下这是不友好的。
-
-比如一个设置页面，大部分设置信息都是本地存储或者依赖非常高效的本地数据库，但是涉及网络和会员等的设置，或者运营方的设置，需要请求额外的API，以及更长的耗时，此时，我们可以优先把已经完成的信息返回给用户，耗时更长的信息可以在获取后再串流返回，这个就是串流技术的作用。
-
-简单来说串流技术是这样使用的：
-
-- 基于HTTP1.1及以后的一个协议，叫`Transfer-Encoding: chunked`，这个协议**支持分块传输响应**，一般用于文件下载，但是从REACT18版本开始，NEXTJS也支持了，目的就是用于串流服务端组件，即服务器可以先传输一部分信息（比如预渲染的加载动画或者本地静态渲染的数据），之后再传输另一部分信息（耗时更长的动态渲染数据），在此期间客户端和服务器的连接会一直保持
-- NEXTJS服务端先返回一些耗时短的HTML，对于耗时长的组件，先返回一个占位符的HTML，这样客户端可以快速展示
-- 之后NEXTJS继续完成耗时长的查询，并返回后续的服务端组件
-- 允许在客户端的REACT，接收到这部分信息后，执行简单的替换代码（或许会用到水合，如果服务端返回的是客户端组件），把对应的占位符HTML替换为真实的服务端组件
-- **数据查询的逻辑需要迁移到子组件内，因为只有子组件本身负责初始化才能避免同时请求多个数据时耗时最长的那个拖慢整体响应的问题，**否则还是在父组件层级进行等待，其他细节后面会提到
-- SEO友好问题，墙内的百度就免谈了，全球来说，这种串流技术对谷歌的爬虫是友好的，因为**谷歌的爬虫可以执行JS，而且只要后续在一个合理耗时内返回动态渲染的组件，那么谷歌的爬虫是愿意等待的，也会在等待后执行JS以拿到真实的页面**，当然如果某个组件耗时太长，不要说SEO了，用户都会提意见
-
-具体的代码编写思路是这样的：
-
-- 在页面层面，可以声明一个`loading.tsx`，用于直接返回结果，NEXTJS的约定配置是，基于文件系统的页面中，如果包含`loadint.tsx`，则优先返回它，之后当耗时的真实渲染完成后，再返回`page.tsx`
-- 在组件层面，可以通过`Suspense`组件来实现相同的效果，先直接返回占位的组件，再返回渲染好的真实组件
-
-比如页面层面，这个是NEXTJS自带的功能，基于约定大于配置的原则，声明好了就可以，比如：
-
-```tsx
-import DashboardSkeleton from '@/app/ui/skeletons';
-
-export default function Loading() {
-  return <DashboardSkeleton />;
-}
-```
-
-默认的规则是，如果`page.tsx`是需要异步的，则先展示loading再展示page，反之如果`page.tsx`是同步的，直接展示page。此外，NEXTJS规定**这个`loading.tsx`必须只能执行同步代码，只能是同步的立刻渲染**。
-
-要验证也很简单，在page里面加一段延迟渲染的wait代码即可，可以发现优先展示了骨架图，之后再展示page。打开调试工具也可以看到首个page请求的瀑布流耗时持续到了最后，请求头里面有`Transfer-Encoding:chunked`。
-
-组件的单个串流，父组件的部分这样写：
-
-```jsx
-import { Suspense } from 'react'; 
-import { RevenueChartSkeleton } from '@/app/ui/skeletons';
-import RevenueChart from '@/app/ui/dashboard/revenue-chart';
-
-export default function MyPage() {
-  return (
-    <Suspense fallback={<RevenueChartSkeleton />}>
-      <RevenueChart />
-    </Suspense>
-  );
-}
-```
-
-至于子组件，内部要写请求数据的逻辑，因此要用`async / await`语法。
-
-总结：
-
-- 父组件用Suspense包裹子组件，并提供子组件渲染完成之前的效果
-- **父组件内不要写数据请求逻辑，转移到子组件内完成，确保子组件是一个async函数，需要耗时来渲染**
-- 子组件渲染完成并返回后，服务端会把这部分响应给客户端，之后客户端的REACT会负责把这部分替换掉之前的渲染部分
 
 
 
